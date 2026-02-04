@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>⚡ TRIDENT V2.3 - ALT HUNTER PRO</title>
+    <title>⚡ TRIDENT V2.4 - ACTIVE ONLY</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
@@ -22,9 +22,9 @@
     <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
         <div>
             <h1 class="text-2xl font-black text-white italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white to-zinc-500">
-                TRIDENT V2.3 <span class="text-xs font-normal not-italic text-zinc-500">DEEP SCAN</span>
+                TRIDENT V2.4 <span class="text-xs font-normal not-italic text-zinc-500">ACTIVE ONLY</span>
             </h1>
-            <p class="text-[10px] text-zinc-500 tracking-widest uppercase">已自動過濾市值前 20 名大幣 | 合約專用</p>
+            <p class="text-[10px] text-zinc-500 tracking-widest uppercase">自動過濾無合約成交標的 (POW > 0)</p>
         </div>
         <div class="flex gap-2">
             <input type="text" id="search-input" placeholder="搜尋妖幣 (如: NEIRO)..." 
@@ -36,7 +36,6 @@
     <div id="main-panel" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 overflow-y-auto pb-24"></div>
 
 <script>
-    // 嚴格黑名單：市值前 20 名與低波動幣種
     const EXCLUDE = [
         'BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','DOGEUSDT',
         'ADAUSDT','TRXUSDT','AVAXUSDT','SHIBUSDT','TONUSDT','LINKUSDT',
@@ -47,31 +46,25 @@
     let marketData = {}; 
     let ghostSymbols = new Set();
 
-    // 1. 合約能量掃描引擎
     async function scanGhosts() {
         try {
             const data = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr').then(r=>r.json());
             const sorted = data.filter(s => s.symbol.endsWith('USDT') && !EXCLUDE.includes(s.symbol))
-                .map(s => {
-                    const volImpulse = parseFloat(s.quoteVolume);
-                    const change = Math.abs(parseFloat(s.priceChangePercent));
-                    return { symbol: s.symbol, ghostScore: volImpulse * change };
-                })
-                .sort((a, b) => b.ghostScore - a.ghostScore).slice(0, 16);
+                .map(s => ({ symbol: s.symbol, ghostScore: parseFloat(s.quoteVolume) * Math.abs(parseFloat(s.priceChangePercent)) }))
+                .sort((a, b) => b.ghostScore - a.ghostScore).slice(0, 20);
             
             ghostSymbols.clear();
             sorted.forEach(g => { ghostSymbols.add(g.symbol); initStream(g.symbol); });
-        } catch(e) { console.error("Scanner Error"); }
+        } catch(e) {}
     }
 
-    // 2. L3 數據流核心邏輯
     function initStream(symbol) {
         if (marketData[symbol]) return;
         const ws = new WebSocket(`wss://fstream.binance.com/ws/${symbol.toLowerCase()}@aggTrade`);
         
         marketData[symbol] = {
             symbol, winRate: 50, avgWinRate5m: 50, delta: 0, lastPrice: 0, maxDelta: 50, 
-            historyDelta: [], historyWinRates: [], isManual: false
+            historyDelta: [], historyWinRates: [], isManual: false, hasActiveTrades: false
         };
 
         ws.onmessage = (e) => {
@@ -80,21 +73,17 @@
             const isSell = data.m;
             let pool = marketData[symbol];
             pool.lastPrice = parseFloat(data.p);
+            pool.hasActiveTrades = true; // 標記為有成交
 
-            // 動態侵略量化
             const currentDelta = isSell ? -size : size;
             pool.delta += currentDelta;
             pool.historyDelta.push(currentDelta);
             if (pool.historyDelta.length > 400) pool.delta -= pool.historyDelta.shift();
 
-            // 歸一化修正（解決熱機與跳閃問題）
             pool.maxDelta = Math.max(pool.maxDelta * 0.9995, Math.abs(pool.delta), 10);
             let targetWinRate = 50 + ((pool.delta / pool.maxDelta) * 50);
-            
-            // 物理平滑（30% 權重跟隨）
             pool.winRate = pool.winRate * 0.7 + targetWinRate * 0.3;
 
-            // 五分鐘時軌採樣 (每 10 秒計入一次)
             if(!pool.lastSampleTime || Date.now() - pool.lastSampleTime > 10000) {
                 pool.historyWinRates.push(pool.winRate);
                 if(pool.historyWinRates.length > 30) pool.historyWinRates.shift();
@@ -104,27 +93,34 @@
         };
     }
 
-    // 3. 渲染與排序
     function render() {
         const panel = document.getElementById('main-panel');
-        const sorted = Object.keys(marketData).sort((a,b) => (ghostSymbols.has(b)-ghostSymbols.has(a)) || (marketData[b].isManual - marketData[a].isManual));
+        // 只過濾出真正有成交 (POW > 0) 的幣
+        const activeSymbols = Object.keys(marketData).filter(s => marketData[s].hasActiveTrades && Math.abs(marketData[s].delta) > 0);
+        const sorted = activeSymbols.sort((a,b) => (ghostSymbols.has(b)-ghostSymbols.has(a)) || (marketData[b].isManual - marketData[a].isManual));
+
+        // 清理面板上不再活躍的卡片
+        const currentIds = new Set(sorted.map(s => `card-${s}`));
+        Array.from(panel.children).forEach(child => {
+            if (!currentIds.has(child.id)) panel.removeChild(child);
+        });
 
         sorted.forEach(s => {
             let item = marketData[s];
             let card = document.getElementById(`card-${s}`);
-            if (!card) { card = document.createElement('div'); card.id = `card-${s}`; panel.prepend(card); }
+            if (!card) { card = document.createElement('div'); card.id = `card-${s}`; panel.appendChild(card); }
 
             const isGhost = ghostSymbols.has(s);
             const trendUp = item.winRate > item.avgWinRate5m;
             const isAggressive = item.winRate > 75 || item.winRate < 25;
 
-            card.className = `card-stat p-4 rounded-lg relative mb-2 ${isGhost ? 'ghost-border' : ''} ${isAggressive ? 'fire-bg' : ''}`;
+            card.className = `card-stat p-4 rounded-lg relative ${isGhost ? 'ghost-border' : ''} ${isAggressive ? 'fire-bg' : ''}`;
             card.innerHTML = `
                 <div class="flex justify-between items-start mb-2">
                     <div>
                         <div class="flex items-center gap-2">
                             <span class="font-bold text-white text-base">${s.replace('USDT','')}</span>
-                            ${isGhost ? '<span class="tag-ghost">GHOST</span>' : ''}
+                            ${isGhost ? '<span class="tag-ghost">FUT GHOST</span>' : ''}
                         </div>
                         <div class="text-[10px] text-zinc-500 font-mono italic">$${item.lastPrice.toLocaleString()}</div>
                     </div>
@@ -140,7 +136,7 @@
                     <div class="${trendUp ? 'text-emerald-400' : 'text-red-400'}">
                         ${trendUp ? '▲ MOMENTUM UP' : '▼ MOMENTUM DECAY'}
                     </div>
-                    <div class="text-zinc-500">POW: ${Math.abs(item.delta).toFixed(0)}</div>
+                    <div class="text-zinc-500 font-mono">POW: ${Math.abs(item.delta).toFixed(0)}</div>
                 </div>
             `;
         });
