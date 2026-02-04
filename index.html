@@ -2,44 +2,32 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>⚡ TRIDENT V2.6 - ADAPTIVE SENSORY</title>
+    <title>⚡ TRIDENT V2.7 - KINETIC HEAVY</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
         body { background: #050505; color: #d4d4d8; font-family: 'JetBrains Mono', monospace; overflow: hidden; }
         .win-gradient { background: linear-gradient(90deg, #ef4444 0%, #18181b 50%, #22c55e 100%); }
-        .win-pointer { width: 5px; height: 32px; background: #fff; position: absolute; top: -6px; transition: all 0.4s cubic-bezier(0.1, 0.7, 0.1, 1); box-shadow: 0 0 15px #fff; }
+        /* 增加指針平滑過度時間 */
+        .win-pointer { width: 5px; height: 32px; background: #fff; position: absolute; top: -6px; transition: all 0.8s cubic-bezier(0.15, 0.5, 0.15, 1); box-shadow: 0 0 15px #fff; }
         .card-stat { background: #0f0f11; border: 1px solid #1f1f23; }
-        .ghost-border { border: 1px solid #f59e0b; background: linear-gradient(180deg, rgba(245, 158, 11, 0.05) 0%, transparent 100%); }
-        .tag-ghost { background: #f59e0b; color: #000; font-size: 10px; font-weight: 900; padding: 1px 6px; border-radius: 3px; }
+        .ghost-border { border: 1px solid #f59e0b; }
     </style>
 </head>
 <body class="flex flex-col h-screen p-4">
 
-    <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-        <div>
-            <h1 class="text-2xl font-black text-white italic tracking-tighter">
-                TRIDENT V2.6 <span class="text-xs font-normal not-italic text-zinc-500">ADAPTIVE</span>
-            </h1>
-            <p class="text-[10px] text-zinc-500 tracking-widest uppercase italic">動態量能感知 | 小幣不失靈 | 排除前 20 大幣</p>
-        </div>
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-xl font-black text-white italic italic">TRIDENT V2.7 <span class="text-xs font-normal text-zinc-500">重力穩定版</span></h1>
         <div class="flex gap-2">
-            <input type="text" id="search-input" placeholder="搜尋妖幣..." 
-                class="bg-zinc-900 border border-zinc-800 rounded px-4 py-2 text-sm text-white focus:border-amber-500 outline-none w-48 transition-all">
-            <button onclick="handleSearch()" class="bg-amber-500 text-black px-6 py-2 rounded font-bold text-sm">追蹤</button>
+            <input type="text" id="search-input" placeholder="搜尋..." class="bg-zinc-900 border border-zinc-800 rounded px-3 py-1 text-sm text-white outline-none">
+            <button onclick="handleSearch()" class="bg-white text-black px-4 py-1 rounded font-bold text-sm">追蹤</button>
         </div>
     </div>
 
-    <div id="main-panel" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 overflow-y-auto pb-24"></div>
+    <div id="main-panel" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 overflow-y-auto pb-24"></div>
 
 <script>
-    const EXCLUDE = [
-        'BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','DOGEUSDT',
-        'ADAUSDT','TRXUSDT','AVAXUSDT','SHIBUSDT','TONUSDT','LINKUSDT',
-        'DOTUSDT','NEARUSDT','MATICUSDT','BCHUSDT','LTCUSDT','ICPUSDT',
-        'UNIUSDT','LEOUSDT','ETCUSDT','XLMUSDT','BNXUSDT'
-    ];
-
+    const EXCLUDE = ['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','DOGEUSDT','ADAUSDT','TRXUSDT','AVAXUSDT','SHIBUSDT','TONUSDT','LINKUSDT','DOTUSDT','NEARUSDT','MATICUSDT','BCHUSDT','LTCUSDT','ICPUSDT','UNIUSDT','LEOUSDT','ETCUSDT','XLMUSDT','BNXUSDT'];
     let marketData = {}; 
     let ghostSymbols = new Set();
 
@@ -47,8 +35,8 @@
         try {
             const data = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr').then(r=>r.json());
             const sorted = data.filter(s => s.symbol.endsWith('USDT') && !EXCLUDE.includes(s.symbol))
-                .map(s => ({ symbol: s.symbol, ghostScore: parseFloat(s.quoteVolume) * Math.abs(parseFloat(s.priceChangePercent)) }))
-                .sort((a, b) => b.ghostScore - a.ghostScore).slice(0, 16);
+                .sort((a, b) => (parseFloat(b.quoteVolume)*Math.abs(parseFloat(b.priceChangePercent))) - (parseFloat(a.quoteVolume)*Math.abs(parseFloat(a.priceChangePercent))))
+                .slice(0, 16);
             ghostSymbols.clear();
             sorted.forEach(g => { ghostSymbols.add(g.symbol); initStream(g.symbol); });
         } catch(e) {}
@@ -57,55 +45,44 @@
     function initStream(symbol) {
         if (marketData[symbol]) return;
         const ws = new WebSocket(`wss://fstream.binance.com/ws/${symbol.toLowerCase()}@aggTrade`);
-        
-        marketData[symbol] = {
-            symbol, winRate: 50, avgWinRate5m: 50, delta: 0, lastPrice: 0, 
-            maxDelta: 500, // 初始靈敏度調高，讓小幣能動
-            historyDelta: [], historyWinRates: [], isManual: false, hasActiveTrades: false
-        };
+        marketData[symbol] = { symbol, winRate: 50, avgWinRate5m: 50, delta: 0, lastPrice: 0, maxDelta: 2000, historyWinRates: [], hasActive: false };
 
         ws.onmessage = (e) => {
             const data = JSON.parse(e.data);
-            const size = parseFloat(data.q);
-            const price = parseFloat(data.p);
-            const value = size * price;
+            const value = parseFloat(data.q) * parseFloat(data.p);
             const isSell = data.m;
             let pool = marketData[symbol];
-
-            // --- V2.6 動態感知：不設死門檻，但極小單不計入方向 ---
-            if (value < 100) return; 
-
-            pool.lastPrice = price;
-            pool.hasActiveTrades = true;
-
-            const currentDelta = isSell ? -value : value;
-            pool.delta += currentDelta;
-            pool.historyDelta.push(currentDelta);
             
-            // 保持緩存長度，適應不同節奏
-            if (pool.historyDelta.length > 300) pool.delta -= pool.historyDelta.shift();
+            // 降噪核心：忽略極小單
+            if (value < 200) return; 
 
-            // --- 靈魂修正：動態分母 ---
-            // 它會根據這隻幣最近的「最大成交」來自我調整，小幣的分母小，大幣的分母大
-            pool.maxDelta = Math.max(pool.maxDelta * 0.999, Math.abs(pool.delta), 1000);
-            let targetWinRate = 50 + ((pool.delta / pool.maxDelta) * 50);
+            pool.lastPrice = parseFloat(data.p);
+            pool.hasActive = true;
+
+            // 累加 Delta
+            pool.delta += isSell ? -value : value;
             
-            // 指針平滑 (稍微調回 0.2，保證反應速度)
-            pool.winRate = pool.winRate * 0.8 + targetWinRate * 0.2;
+            // 修正分母邏輯：增加基礎厚度 (3000)，讓指針不再閃現
+            pool.maxDelta = Math.max(pool.maxDelta * 0.9999, Math.abs(pool.delta), 3000);
+            
+            // 計算目標 winRate
+            let target = 50 + ((pool.delta / pool.maxDelta) * 50);
+            
+            // 重力平滑：每次成交只影響 5% 的移動，這會讓指針變得很穩
+            pool.winRate = (pool.winRate * 0.95) + (target * 0.05);
 
-            if(!pool.lastSampleTime || Date.now() - pool.lastSampleTime > 10000) {
+            if(!pool.lastT || Date.now() - pool.lastT > 10000) {
                 pool.historyWinRates.push(pool.winRate);
                 if(pool.historyWinRates.length > 30) pool.historyWinRates.shift();
                 pool.avgWinRate5m = pool.historyWinRates.reduce((a,b)=>a+b,0) / pool.historyWinRates.length;
-                pool.lastSampleTime = Date.now();
+                pool.lastT = Date.now();
             }
         };
     }
 
     function render() {
         const panel = document.getElementById('main-panel');
-        const activeSymbols = Object.keys(marketData).filter(s => marketData[s].hasActiveTrades);
-        const sorted = activeSymbols.sort((a,b) => (ghostSymbols.has(b)-ghostSymbols.has(a)) || (marketData[b].isManual - marketData[a].isManual));
+        const sorted = Object.keys(marketData).filter(s => marketData[s].hasActive).sort((a,b) => ghostSymbols.has(b) - ghostSymbols.has(a));
 
         sorted.forEach(s => {
             let item = marketData[s];
@@ -113,27 +90,20 @@
             if (!card) { card = document.createElement('div'); card.id = `card-${s}`; panel.appendChild(card); }
 
             const trendUp = item.winRate > item.avgWinRate5m;
-            const isAggressive = item.winRate > 80 || item.winRate < 20;
-
-            card.className = `card-stat p-4 rounded-lg relative ${ghostSymbols.has(s) ? 'ghost-border' : ''} ${isAggressive ? 'bg-zinc-900/50 border-white/20' : ''}`;
+            card.className = `card-stat p-4 rounded-lg relative ${ghostSymbols.has(s) ? 'ghost-border' : ''}`;
             card.innerHTML = `
                 <div class="flex justify-between items-start mb-2">
-                    <div>
-                        <div class="font-bold text-white text-base">${s.replace('USDT','')}</div>
-                        <div class="text-[10px] text-zinc-500 font-mono italic">$${item.lastPrice.toLocaleString()}</div>
-                    </div>
-                    <div class="text-right">
-                        <div class="text-[9px] text-zinc-600 uppercase">5m Avg: ${item.avgWinRate5m.toFixed(1)}%</div>
-                        <div class="text-xl font-black ${item.winRate > 50 ? 'text-emerald-500' : 'text-red-500'}">${item.winRate.toFixed(1)}%</div>
+                    <div class="font-bold text-white">${s.replace('USDT','')}</div>
+                    <div class="text-right text-xs">
+                        <div class="text-zinc-500">5M: ${item.avgWinRate5m.toFixed(1)}%</div>
+                        <div class="text-lg font-black ${item.winRate > 50 ? 'text-emerald-500' : 'text-red-500'}">${item.winRate.toFixed(1)}%</div>
                     </div>
                 </div>
                 <div class="h-4 w-full win-gradient rounded-sm relative mb-4">
                     <div class="win-pointer" style="left: ${item.winRate}%"></div>
                 </div>
-                <div class="flex justify-between text-[10px] items-center font-bold">
-                    <div class="${trendUp ? 'text-emerald-400' : 'text-red-400'}">
-                        ${trendUp ? '▲ TRENDING UP' : '▼ MOMENTUM DECAY'}
-                    </div>
+                <div class="flex justify-between text-[10px] font-bold">
+                    <div class="${trendUp ? 'text-emerald-400' : 'text-red-400'}">${trendUp ? '▲ STABLE BUY' : '▼ STABLE SELL'}</div>
                     <div class="text-zinc-500">POW: $${(Math.abs(item.delta)/1000).toFixed(1)}K</div>
                 </div>
             `;
@@ -143,21 +113,12 @@
     function handleSearch() {
         const input = document.getElementById('search-input');
         const s = input.value.trim().toUpperCase();
-        if (s) {
-            const sym = s.endsWith('USDT') ? s : s + 'USDT';
-            initStream(sym);
-            if(marketData[sym]) marketData[sym].isManual = true;
-            input.value = '';
-        }
+        if (s) { initStream(s.endsWith('USDT')?s:s+'USDT'); input.value=''; }
     }
 
-    async function start() {
-        await scanGhosts();
-        setInterval(scanGhosts, 15000); 
-        setInterval(render, 800);
-    }
-    document.getElementById('search-input').addEventListener('keypress', (e) => { if(e.key==='Enter') handleSearch(); });
-    start();
+    scanGhosts();
+    setInterval(scanGhosts, 20000); 
+    setInterval(render, 800);
 </script>
 </body>
 </html>
