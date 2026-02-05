@@ -2,28 +2,35 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>⚡ TRIDENT V3.3 - IRON STEADY</title>
+    <title>⚡ TRIDENT V4.0 - ULTIMATE</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
         body { background: #050505; color: #d4d4d8; font-family: 'JetBrains Mono', monospace; overflow: hidden; }
         .win-gradient { background: linear-gradient(90deg, #ef4444 0%, #18181b 50%, #22c55e 100%); }
-        /* 增加 Transition 時間讓視覺更平滑 */
-        .win-pointer { width: 4px; height: 32px; background: #fff; position: absolute; top: -6px; transition: all 0.6s cubic-bezier(0.1, 0.5, 0.2, 1); box-shadow: 0 0 15px #fff; z-index: 20; }
-        .avg-pointer { width: 2px; height: 32px; background: rgba(255,255,255,0.4); position: absolute; top: -6px; transition: all 1s; border: 1px dashed #fff; z-index: 10; }
-        .long-pointer { width: 2px; height: 32px; background: #f59e0b; position: absolute; top: -6px; transition: all 1.5s; border: 1px dotted #f59e0b; z-index: 5; }
-        .card-stat { background: #0f0f11; border: 1px solid #1f1f23; transition: 0.3s; }
+        /* NOW 實線 (最快) */
+        .win-pointer { width: 4px; height: 32px; background: #fff; position: absolute; top: -6px; transition: all 0.5s; box-shadow: 0 0 15px #fff; z-index: 40; }
+        /* 5M 虛線 (快) */
+        .avg-pointer { width: 2px; height: 32px; background: rgba(255,255,255,0.6); position: absolute; top: -6px; transition: all 0.8s; border: 1px dashed #fff; z-index: 30; }
+        /* 1H 點線 (中) */
+        .h1-pointer { width: 2px; height: 32px; background: #f59e0b; position: absolute; top: -6px; transition: all 1.2s; border: 1px dotted #f59e0b; z-index: 20; }
+        /* 4H 實線細針 (慢) */
+        .h4-pointer { width: 2px; height: 32px; background: #3b82f6; position: absolute; top: -6px; transition: all 1.5s; z-index: 10; }
+        
+        .card-stat { background: #0f0f11; border: 1px solid #1f1f23; position: relative; }
         .signal-buy { border: 2px solid #10b981; }
         .signal-sell { border: 2px solid #ef4444; }
-        .signal-hold { border: 2px solid #a855f7; box-shadow: 0 0 20px rgba(168,85,247,0.2); } 
+        .signal-hold { border: 2px solid #a855f7; box-shadow: 0 0 20px rgba(168,85,247,0.2); }
+        .del-btn { opacity: 0; transition: 0.2s; }
+        .card-stat:hover .del-btn { opacity: 1; }
     </style>
 </head>
 <body class="flex flex-col h-screen p-4">
 
     <div class="flex justify-between items-center mb-6">
         <div>
-            <h1 class="text-xl font-black text-white italic">TRIDENT V3.3 <span class="text-xs font-normal text-zinc-500 uppercase">Iron Steady</span></h1>
-            <p class="text-[9px] text-zinc-600">強化慣性邏輯 | 拒絕閃現 | 排除市值前 20 大幣</p>
+            <h1 class="text-xl font-black text-white italic">TRIDENT V4.0 <span class="text-xs font-normal text-zinc-500 uppercase">Ultimate Quad-Core</span></h1>
+            <p class="text-[9px] text-zinc-600">白實:NOW | 白虛:5M | 黃點:1H | 藍實:4H | 點擊 × 刪除並自動補充</p>
         </div>
         <div class="flex gap-2">
             <input type="text" id="search-input" placeholder="搜尋..." class="bg-zinc-900 border border-zinc-800 rounded px-3 py-1 text-sm text-white outline-none w-32 focus:border-amber-500">
@@ -36,106 +43,136 @@
 <script>
     const EXCLUDE = ['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','DOGEUSDT','ADAUSDT','TRXUSDT','AVAXUSDT','SHIBUSDT','TONUSDT','LINKUSDT','DOTUSDT','NEARUSDT','MATICUSDT','BCHUSDT','LTCUSDT','ICPUSDT','UNIUSDT','LEOUSDT','ETCUSDT','XLMUSDT','BNXUSDT'];
     let marketData = {}; 
+    let manualExcludes = new Set(); // 存放使用者點擊刪除的幣種
 
+    // 1. 初始化與歷史數據抓取
     async function initStream(symbol) {
         if (marketData[symbol]) return;
         
-        let initialDelta = 0;
+        let delta4h = 0, delta1h = 0;
         try {
-            const hist = await fetch(`https://fapi.binance.com/fapi/v1/aggTrades?symbol=${symbol}&limit=50`).then(r=>r.json());
-            hist.forEach(t => { initialDelta += t.m ? -(parseFloat(t.q)*parseFloat(t.p)) : (parseFloat(t.q)*parseFloat(t.p)); });
+            const klines = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1m&limit=240`).then(r=>r.json());
+            klines.forEach((k, idx) => {
+                const vol = parseFloat(k[7]);
+                const taker = parseFloat(k[10]);
+                const d = taker - (vol - taker);
+                delta4h += d;
+                if (idx >= 180) delta1h += d; // 最後 60 筆是一小時
+            });
         } catch(e) {}
 
         const ws = new WebSocket(`wss://fstream.binance.com/ws/${symbol.toLowerCase()}@aggTrade`);
         marketData[symbol] = { 
-            symbol, winRate: 50, avgWinRate5m: 50, avgWinRate1h: 50, delta: initialDelta, 
-            lastPrice: 0, maxDelta: 10000, history5m: [], history1h: [], hasActive: false, 
-            signal: 'NEUTRAL', prevWinRate: 50
+            symbol, winRate: 50, avgWinRate5m: 50, avgWinRate1h: 50, avgWinRate4h: 50,
+            delta: delta4h, lastPrice: 0, maxDelta: 15000, history5m: [], history1h: [], history4h: [],
+            hasActive: false, signal: 'NEUTRAL', prevWinRate: 50
         };
+
+        // 初始賦值 (避免指針從 0 開始)
+        marketData[symbol].avgWinRate4h = 50 + ((delta4h / (15000 * 240)) * 50);
+        marketData[symbol].avgWinRate1h = 50 + ((delta1h / (15000 * 60)) * 50);
 
         ws.onmessage = (e) => {
             const data = JSON.parse(e.data);
             const value = parseFloat(data.q) * parseFloat(data.p);
-            
-            // 提高門檻，過濾雜訊
             if (value < 300) return; 
 
             let pool = marketData[symbol];
-            pool.lastPrice = parseFloat(data.p);
-            pool.hasActive = true;
+            pool.lastPrice = parseFloat(data.p); pool.hasActive = true;
             pool.delta += data.m ? -value : value;
-            
-            // 鋼鐵底盤：maxDelta 衰減變慢，且底線拉高到 10000
-            pool.maxDelta = Math.max(pool.maxDelta * 0.99995, Math.abs(pool.delta), 10000);
+            pool.maxDelta = Math.max(pool.maxDelta * 0.99995, Math.abs(pool.delta), 15000);
             
             let target = 50 + ((pool.delta / pool.maxDelta) * 50);
             pool.prevWinRate = pool.winRate;
-            
-            // 物理重力：權重降至 3% (0.03)，指針會動得非常穩重
             pool.winRate = (pool.winRate * 0.97) + (target * 0.03);
 
-            // 5M AVG (8s)
+            // 5M AVG
             if(!pool.lastT5 || Date.now() - pool.lastT5 > 8000) {
                 pool.history5m.push(pool.winRate);
                 if(pool.history5m.length > 40) pool.history5m.shift();
                 pool.avgWinRate5m = pool.history5m.reduce((a,b)=>a+b,0) / pool.history5m.length;
                 pool.lastT5 = Date.now();
             }
-
-            // 1H AVG (120s)
-            if(!pool.lastT1h || Date.now() - pool.lastT1h > 120000) {
+            // 1H AVG (30秒採樣)
+            if(!pool.lastT1h || Date.now() - pool.lastT1h > 30000) {
                 pool.history1h.push(pool.winRate);
-                if(pool.history1h.length > 30) pool.history1h.shift();
+                if(pool.history1h.length > 120) pool.history1h.shift();
                 pool.avgWinRate1h = pool.history1h.reduce((a,b)=>a+b,0) / pool.history1h.length;
                 pool.lastT1h = Date.now();
             }
+            // 4H AVG (2分鐘採樣)
+            if(!pool.lastT4h || Date.now() - pool.lastT4h > 120000) {
+                pool.history4h.push(pool.winRate);
+                if(pool.history4h.length > 120) pool.history4h.shift();
+                pool.avgWinRate4h = pool.history4h.reduce((a,b)=>a+b,0) / pool.history4h.length;
+                pool.lastT4h = Date.now();
+            }
 
-            const isExtremeHigh = pool.winRate > 88;
-            const isDecaying = pool.winRate < pool.prevWinRate;
-            if (isExtremeHigh && !isDecaying) pool.signal = 'HOLD'; 
+            const isEx = pool.winRate > 88;
+            if (isEx && pool.winRate >= pool.prevWinRate) pool.signal = 'HOLD'; 
             else if (pool.winRate > pool.avgWinRate5m + 1.5) pool.signal = 'BUY'; 
             else if (pool.winRate < pool.avgWinRate5m - 1.2) pool.signal = 'SELL';
             else pool.signal = 'NEUTRAL';
         };
+        marketData[symbol].ws = ws;
     }
 
-    async function scanGhosts() {
+    // 2. 自動掃描與替補
+    async function scan() {
         try {
             const data = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr').then(r=>r.json());
-            const sorted = data.filter(s => s.symbol.endsWith('USDT') && !EXCLUDE.includes(s.symbol))
-                .sort((a, b) => (parseFloat(b.quoteVolume)*Math.abs(parseFloat(b.priceChangePercent))) - (parseFloat(a.quoteVolume)*Math.abs(parseFloat(a.priceChangePercent))))
-                .slice(0, 16);
-            sorted.forEach(g => initStream(g.symbol));
+            const sorted = data.filter(s => s.symbol.endsWith('USDT') && !EXCLUDE.includes(s.symbol) && !manualExcludes.has(s.symbol))
+                .sort((a, b) => (parseFloat(b.quoteVolume)*Math.abs(parseFloat(b.priceChangePercent))) - (parseFloat(a.quoteVolume)*Math.abs(parseFloat(a.priceChangePercent))));
+            
+            // 確保面板始終有 16 個
+            let count = 0;
+            for (let item of sorted) {
+                if (count >= 16) break;
+                initStream(item.symbol);
+                count++;
+            }
         } catch(e) {}
+    }
+
+    // 3. 刪除邏輯
+    function removeSymbol(s) {
+        if (marketData[s]) {
+            if(marketData[s].ws) marketData[s].ws.close();
+            delete marketData[s];
+            manualExcludes.add(s);
+            const card = document.getElementById(`card-${s}`);
+            if (card) card.remove();
+            scan(); // 立即補位
+        }
     }
 
     function render() {
         const panel = document.getElementById('main-panel');
         const active = Object.keys(marketData).filter(s => marketData[s].hasActive);
-        const sorted = active.sort((a,b) => marketData[b].winRate - marketData[a].winRate);
-
-        sorted.forEach(s => {
+        active.sort((a,b) => marketData[b].winRate - marketData[a].winRate).forEach(s => {
             let item = marketData[s];
             let card = document.getElementById(`card-${s}`);
             if (!card) { card = document.createElement('div'); card.id = `card-${s}`; panel.appendChild(card); }
 
             let sigClass = item.signal === 'BUY' ? 'signal-buy' : (item.signal === 'SELL' ? 'signal-sell' : (item.signal === 'HOLD' ? 'signal-hold' : ''));
-            
-            card.className = `card-stat p-4 rounded-lg relative ${sigClass}`;
+            card.className = `card-stat p-4 rounded-lg ${sigClass}`;
             card.innerHTML = `
+                <button onclick="removeSymbol('${s}')" class="del-btn absolute top-1 right-2 text-zinc-600 hover:text-white text-xs">×</button>
                 <div class="flex justify-between items-start mb-2">
                     <div>
                         <div class="font-black text-white italic text-base leading-none">${s.replace('USDT','')}</div>
                         <div class="text-[9px] text-zinc-500 mt-1 font-mono">$${item.lastPrice}</div>
                     </div>
-                    <div class="text-right">
-                        <div class="text-[8px] text-amber-500 font-bold tracking-tighter">1H: ${item.avgWinRate1h.toFixed(1)}%</div>
-                        <div class="text-[8px] text-zinc-400 font-bold uppercase">5M: ${item.avgWinRate5m.toFixed(1)}%</div>
+                    <div class="text-right text-[8px] font-bold tracking-tighter leading-tight">
+                        <div class="text-blue-500">4H: ${item.avgWinRate4h.toFixed(1)}%</div>
+                        <div class="text-amber-500">1H: ${item.avgWinRate1h.toFixed(1)}%</div>
+                        <div class="text-zinc-400">5M: ${item.avgWinRate5m.toFixed(1)}%</div>
                         <div class="text-lg font-black ${item.winRate > 50 ? 'text-emerald-500' : 'text-red-500'}">${item.winRate.toFixed(1)}%</div>
                     </div>
                 </div>
                 <div class="h-4 w-full win-gradient rounded-sm relative mb-4">
-                    <div class="long-pointer" style="left: ${item.avgWinRate1h}%"></div>
+                    <div class="h4-pointer" style="left: ${item.avgWinRate4h}%"></div>
+                    <div class="h1-pointer" style="left: ${item.avgWinRate1h}%"></div>
                     <div class="avg-pointer" style="left: ${item.avgWinRate5m}%"></div>
                     <div class="win-pointer" style="left: ${item.winRate}%"></div>
                 </div>
@@ -149,8 +186,8 @@
         });
     }
 
-    scanGhosts();
-    setInterval(scanGhosts, 20000); 
+    scan();
+    setInterval(scan, 10000); 
     setInterval(render, 500);
     document.getElementById('search-input').addEventListener('keypress', (e) => { if(e.key==='Enter') handleSearch(); });
     function handleSearch() {
