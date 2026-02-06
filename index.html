@@ -2,25 +2,24 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>⚡ TRIDENT V5.4 - FULL DATA RADAR</title>
+    <title>⚡ TRIDENT V5.5 - HYPER-DRIVE</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
         body { background: #050505; color: #d4d4d8; font-family: 'JetBrains Mono', monospace; overflow: hidden; }
         .win-gradient { background: linear-gradient(90deg, #ef4444 0%, #18181b 50%, #22c55e 100%); }
-        .win-pointer { width: 4px; height: 32px; background: #fff; position: absolute; top: -6px; transition: all 0.4s; box-shadow: 0 0 15px #fff; z-index: 40; }
-        .avg-pointer { width: 2px; height: 32px; background: rgba(255,255,255,0.6); position: absolute; top: -6px; transition: all 0.8s; border: 1px dashed #fff; z-index: 30; }
-        .h1-pointer { width: 2px; height: 32px; background: #f59e0b; position: absolute; top: -6px; transition: all 1.2s; border: 1px dotted #f59e0b; z-index: 20; }
-        .h4-pointer { width: 2px; height: 32px; background: #3b82f6; position: absolute; top: -6px; transition: all 1.5s; z-index: 10; }
-        .card-stat { background: #0f0f11; border: 1px solid #1f1f23; transition: 0.5s; position: relative; }
+        .win-pointer { width: 4px; height: 32px; background: #fff; position: absolute; top: -6px; transition: all 0.3s; box-shadow: 0 0 15px #fff; z-index: 40; }
+        .avg-pointer { width: 2px; height: 32px; background: rgba(255,255,255,0.6); position: absolute; top: -6px; border: 1px dashed #fff; z-index: 30; }
+        .h1-pointer { width: 2px; height: 32px; background: #f59e0b; position: absolute; top: -6px; border: 1px dotted #f59e0b; z-index: 20; }
+        .h4-pointer { width: 2px; height: 32px; background: #3b82f6; position: absolute; top: -6px; z-index: 10; }
+        .card-stat { background: #0f0f11; border: 1px solid #1f1f23; position: relative; }
         .signal-buy { border: 2px solid #10b981; }
         .signal-sell { border: 2px solid #ef4444; }
         .signal-hold { border: 2px solid #a855f7; box-shadow: 0 0 20px rgba(168,85,247,0.1); }
         .del-btn { opacity: 0; transition: 0.2s; position: absolute; top: 4px; right: 8px; z-index: 50; }
         .card-stat:hover .del-btn { opacity: 1; }
-        #heartbeat { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+        #heartbeat { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px; transition: 0.1s; }
         .hb-active { background: #22c55e; box-shadow: 0 0 10px #22c55e; }
-        .hb-idle { background: #ef4444; }
         .blink { animation: blinker 1.5s linear infinite; }
         @keyframes blinker { 50% { opacity: 0.3; } }
     </style>
@@ -28,19 +27,18 @@
 <body class="flex flex-col h-screen p-4">
     <div class="flex justify-between items-start mb-4">
         <div class="flex items-center">
-            <div id="heartbeat" class="hb-idle"></div>
+            <div id="heartbeat"></div>
             <div>
-                <h1 class="text-xl font-black text-white italic leading-none">TRIDENT V5.4</h1>
-                <p id="scan-status" class="text-[9px] text-zinc-500 font-mono mt-1 font-bold">RADAR INITIALIZING...</p>
+                <h1 class="text-xl font-black text-white italic leading-none">TRIDENT V5.5</h1>
+                <p id="scan-status" class="text-[9px] text-zinc-500 font-mono mt-1 font-bold">READY TO SCAN...</p>
             </div>
         </div>
         <div class="flex flex-col items-end gap-2">
             <div class="flex gap-2">
-                <button onclick="location.reload()" class="bg-red-900/50 hover:bg-red-600 border border-red-500 text-white text-[10px] px-2 py-1 rounded font-bold">☢ 重啟雷達</button>
-                <input type="text" id="search-input" placeholder="搜尋幣種" class="bg-zinc-900 border border-zinc-700 text-[10px] px-2 py-1 rounded text-white focus:outline-none focus:border-amber-500 w-24">
-                <button onclick="manualSearch()" class="bg-amber-600 hover:bg-amber-500 text-white text-[10px] px-2 py-1 rounded font-bold">追蹤</button>
+                <button onclick="location.reload()" class="bg-red-900/50 hover:bg-red-600 border border-red-500 text-white text-[10px] px-2 py-1 rounded font-bold">☢ 重啟</button>
+                <input type="text" id="search-input" placeholder="搜尋幣種" class="bg-zinc-900 border border-zinc-700 text-[10px] px-2 py-1 rounded text-white focus:border-amber-500 w-24 outline-none">
+                <button onclick="manualSearch()" class="bg-amber-600 hover:bg-amber-500 text-white text-[10px] px-2 py-1 rounded font-bold uppercase">Search</button>
             </div>
-            <div class="text-[9px] text-zinc-600 font-mono">ALL METRICS RECOVERED | FULL MARKET SCAN</div>
         </div>
     </div>
 
@@ -53,29 +51,33 @@
     let scanQueue = [];
     let lastHeartbeat = Date.now();
 
-    setInterval(() => {
-        const hb = document.getElementById('heartbeat');
-        if (Date.now() - lastHeartbeat < 2000) { hb.className = 'hb-active'; setTimeout(() => hb.className = '', 100); }
-        else { hb.className = 'hb-idle'; }
-    }, 1000);
-
+    // 1. 核心精算函數
     async function initStream(symbol, isPriority = false) {
-        if (marketData[symbol] && marketData[symbol].isReady) { if (isPriority) marketData[symbol].priority = true; return; }
+        if (marketData[symbol]?.ws && !isPriority) return;
         symbol = symbol.toUpperCase().endsWith('USDT') ? symbol.toUpperCase() : symbol.toUpperCase() + 'USDT';
         
+        // 抓取回填數據
         try {
-            const k = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1m&limit=240`).then(r=>r.json());
+            const [k, f] = await Promise.all([
+                fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1m&limit=240`).then(r=>r.json()),
+                fetch(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`).then(r=>r.json())
+            ]);
+
             let d4=0, d1=0, d5m=0;
             k.forEach((v, i) => { 
                 let d = parseFloat(v[10]) - (parseFloat(v[7]) - parseFloat(v[10]));
                 d4 += d; if(i >= 180) d1 += d; if(i >= 235) d5m += d;
             });
-            const f = await fetch(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`).then(r=>r.json());
+
+            // 如果已有連線先關閉，確保不重疊
+            if(marketData[symbol]?.ws) marketData[symbol].ws.close();
+
             const ws = new WebSocket(`wss://fstream.binance.com/ws/${symbol.toLowerCase()}@aggTrade`);
-            
             marketData[symbol] = { 
-                symbol, winRate: 50, avgWinRate5m: 50 + (d5m/500000*50), avgWinRate1h: 50 + (d1/5000000*50), avgWinRate4h: 50 + (d4/20000000*50),
-                delta: d4, lastPrice: 0, maxDelta: 20000, fundingRate: parseFloat(f.lastFundingRate)*100, priority: isPriority, isReady: true, ws: ws, lastUpdate: Date.now()
+                symbol, winRate: 50, 
+                avgWinRate5m: 50 + (d5m/500000*50), avgWinRate1h: 50 + (d1/5000000*50), avgWinRate4h: 50 + (d4/20000000*50),
+                delta: d4, lastPrice: 0, maxDelta: 20000, fundingRate: parseFloat(f.lastFundingRate)*100, 
+                priority: isPriority, isReady: true, ws: ws, lastUpdate: Date.now()
             };
 
             ws.onmessage = (e) => {
@@ -87,30 +89,44 @@
                 p.maxDelta = Math.max(p.maxDelta * 0.9999, Math.abs(p.delta), 20000);
                 let t = 50 + (Math.tanh((p.delta/p.maxDelta) * 1.8) * 50);
                 p.winRate = (p.winRate * 0.9) + (t * 0.1);
+                
+                // 周期滾動
                 if(!p.t5 || Date.now()-p.t5>8000) { p.avgWinRate5m = (p.avgWinRate5m*0.9)+ (p.winRate*0.1); p.t5=Date.now(); }
                 if(!p.t1 || Date.now()-p.t1>30000) { p.avgWinRate1h = (p.avgWinRate1h*0.98)+ (p.winRate*0.02); p.t1=Date.now(); }
                 if(!p.t4 || Date.now()-p.t4>120000) { p.avgWinRate4h = (p.avgWinRate4h*0.99)+ (p.winRate*0.01); p.t4=Date.now(); }
             };
-        } catch(e) {}
+        } catch(e) { console.error(`${symbol} failed.`); }
     }
 
+    // 2. 自動清理與排序邏輯 (核心防卡頓)
     async function globalScan() {
         const tickers = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr').then(r=>r.json());
         const all = tickers
             .filter(s => s.symbol.endsWith('USDT') && !EXCLUDE.includes(s.symbol) && !manualExcludes.has(s.symbol))
             .sort((a,b) => (parseFloat(b.quoteVolume)*Math.abs(parseFloat(b.priceChangePercent))) - (parseFloat(a.quoteVolume)*Math.abs(parseFloat(a.priceChangePercent))));
 
-        for(let s of all.slice(0, 20)) { await initStream(s.symbol); }
+        const topTargets = all.slice(0, 20);
+        
+        // 找出哪些幣該連，哪些該斷
+        const activeSymbols = new Set(topTargets.map(t => t.symbol));
+        Object.keys(marketData).forEach(s => {
+            if (!activeSymbols.has(s) && !marketData[s].priority) {
+                if(marketData[s].ws) marketData[s].ws.close();
+                delete marketData[s]; // 徹底清理釋放
+            }
+        });
+
+        for(let s of topTargets) { await initStream(s.symbol); }
         scanQueue = all.slice(20);
         processQueue();
     }
 
     async function processQueue() {
-        if (scanQueue.length === 0) return;
-        document.getElementById('scan-status').innerText = `RADAR: ${scanQueue.length} ASSETS LEFT`;
-        let batch = scanQueue.splice(0, 3);
+        if (scanQueue.length === 0) { document.getElementById('scan-status').innerText = "RADAR: MONITORING"; return; }
+        document.getElementById('scan-status').innerText = `RADAR: ${scanQueue.length} COINS IN QUEUE`;
+        let batch = scanQueue.splice(0, 2); // 慢速精算背景，不佔頻寬
         await Promise.all(batch.map(s => initStream(s.symbol)));
-        setTimeout(processQueue, 1500);
+        setTimeout(processQueue, 2000);
     }
 
     function manualSearch() {
@@ -120,15 +136,20 @@
     }
 
     function removeSymbol(s) {
-        if(marketData[s]) { marketData[s].ws.close(); delete marketData[s]; manualExcludes.add(s); document.getElementById(`card-${s}`)?.remove(); }
+        if(marketData[s]) { if(marketData[s].ws) marketData[s].ws.close(); delete marketData[s]; manualExcludes.add(s); document.getElementById(`card-${s}`)?.remove(); }
     }
 
+    // 3. 渲染邏輯
     function render() {
         const panel = document.getElementById('main-panel');
         const sorted = Object.keys(marketData)
             .filter(s => marketData[s].isReady)
             .sort((a,b) => (marketData[a].priority ? -1 : (marketData[b].priority ? 1 : marketData[b].winRate - marketData[a].winRate)))
             .slice(0, 20);
+
+        // 心跳燈同步
+        const hb = document.getElementById('heartbeat');
+        if (Date.now() - lastHeartbeat < 1500) { hb.className = 'hb-active'; } else { hb.className = ''; }
 
         sorted.forEach(s => {
             let item = marketData[s]; let card = document.getElementById(`card-${s}`);
@@ -143,17 +164,17 @@
                         <div class="font-black text-white italic text-base leading-none">${s.replace('USDT','')}</div>
                         <div class="text-[9px] text-zinc-500 mt-1">$${parseFloat(item.lastPrice).toLocaleString()}</div>
                     </div>
-                    <div class="text-right flex flex-col items-end">
-                        <div class="flex gap-2 text-[8px] font-bold">
-                            <span class="text-blue-500">4H:${item.avgWinRate4h.toFixed(1)}%</span>
-                            <span class="text-amber-500">1H:${item.avgWinRate1h.toFixed(1)}%</span>
-                            <span class="text-zinc-400">5M:${item.avgWinRate5m.toFixed(1)}%</span>
+                    <div class="text-right flex flex-col items-end leading-none">
+                        <div class="flex gap-1 text-[7.5px] font-bold mb-1 uppercase">
+                            <span class="text-blue-500">4H:${item.avgWinRate4h.toFixed(1)}</span>
+                            <span class="text-amber-500">1H:${item.avgWinRate1h.toFixed(1)}</span>
+                            <span class="text-zinc-500">5M:${item.avgWinRate5m.toFixed(1)}</span>
                         </div>
                         <div class="text-xl font-black ${item.winRate>50?'text-emerald-500':'text-red-500'}">${item.winRate.toFixed(1)}%</div>
-                        ${isFundingHigh ? `<div class="text-[8px] text-amber-500 font-bold blink">FR ${item.fundingRate.toFixed(3)}%</div>` : ''}
+                        ${isFundingHigh ? `<div class="text-[8px] text-amber-500 font-bold blink mt-1">FR ${item.fundingRate.toFixed(3)}%</div>` : ''}
                     </div>
                 </div>
-                <div class="h-4 w-full win-gradient rounded-sm relative mb-2">
+                <div class="h-4 w-full win-gradient rounded-sm relative mb-2 overflow-hidden">
                     <div class="h4-pointer" style="left:${item.avgWinRate4h}%"></div>
                     <div class="h1-pointer" style="left:${item.avgWinRate1h}%"></div>
                     <div class="avg-pointer" style="left:${item.avgWinRate5m}%"></div>
@@ -164,9 +185,16 @@
                     <div class="text-zinc-500">POW: $${(Math.abs(item.delta)/1000).toFixed(1)}K</div>
                 </div>`;
         });
+        
+        // 清理沒在 sorted 裡的舊卡片
+        Array.from(panel.children).forEach(child => {
+            if (!sorted.includes(child.id.replace('card-',''))) child.remove();
+        });
     }
 
-    globalScan(); setInterval(render, 1000);
+    globalScan();
+    setInterval(render, 1000); 
+    setInterval(globalScan, 300000); // 每 5 分鐘大規模重新洗牌一次，清理內存
     document.getElementById('search-input').addEventListener('keypress', (e) => { if(e.key === 'Enter') manualSearch(); });
 </script>
 </body>
