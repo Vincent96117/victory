@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>⚡ TRIDENT V6.2 - PRO</title>
+    <title>⚡ TRIDENT V6.3 - FINAL</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
@@ -12,20 +12,14 @@
         .avg-pointer { width: 2px; height: 32px; background: rgba(255,255,255,0.6); position: absolute; top: -6px; border: 1px dashed #fff; z-index: 30; }
         .h1-pointer { width: 2px; height: 32px; background: #f59e0b; position: absolute; top: -6px; border: 1px dotted #f59e0b; z-index: 20; }
         .h4-pointer { width: 2px; height: 32px; background: #3b82f6; position: absolute; top: -6px; z-index: 10; }
-        
         .card-stat { background: #0f0f11; border: 1px solid #1f1f23; position: relative; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); min-height: 150px; }
         .sniper-active { border: 2px solid #ef4444 !important; background: #1a0a0a !important; box-shadow: 0 0 15px rgba(239, 68, 68, 0.2); }
-        
-        /* 圖表盒：預設高度 0，展開後 350px */
         .chart-box { height: 0; background: #000; margin-top: 0; border-radius: 4px; overflow: hidden; transition: all 0.3s ease; opacity: 0; }
         .chart-box.active { height: 350px; margin-top: 12px; opacity: 1; border: 1px solid #333; }
-        
         .del-btn { opacity: 0; transition: 0.2s; position: absolute; top: 4px; right: 8px; z-index: 50; cursor: pointer; color: #52525b; font-size: 20px; }
         .card-stat:hover .del-btn { opacity: 1; color: #fff; }
         #heartbeat { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px; }
         .hb-active { background: #22c55e; box-shadow: 0 0 10px #22c55e; }
-        .blink { animation: blinker 1.5s linear infinite; }
-        @keyframes blinker { 50% { opacity: 0.3; } }
     </style>
 </head>
 <body class="flex flex-col h-screen p-4">
@@ -33,8 +27,8 @@
         <div class="flex items-center">
             <div id="heartbeat"></div>
             <div>
-                <h1 class="text-xl font-black text-white italic leading-none">TRIDENT <span class="text-red-500">V6.2 PRO</span></h1>
-                <p class="text-[9px] text-zinc-500 font-mono mt-1 font-bold uppercase tracking-widest">Sniper Alert + Smart Chart Space</p>
+                <h1 class="text-xl font-black text-white italic leading-none text-red-500">TRIDENT V6.3</h1>
+                <p class="text-[9px] text-zinc-500 font-mono mt-1 font-bold uppercase tracking-widest">Search & Sniper Priority Mode</p>
             </div>
         </div>
         <div class="flex items-end gap-2">
@@ -66,11 +60,15 @@
         });
     }
 
-    function testPush() { sendPush("TRIDENT V6.2 測試", "圖表展開功能修復完成！"); alert("測試訊號已發送！"); }
+    function testPush() { sendPush("TRIDENT V6.3 測試", "搜尋與排序邏輯修復完成！"); alert("測試訊號已發送！"); }
 
     async function initStream(symbol, isPriority = false) {
         const cleanSymbol = symbol.toUpperCase().endsWith('USDT') ? symbol.toUpperCase() : symbol.toUpperCase() + 'USDT';
-        if (marketData[cleanSymbol]?.ws) { if(isPriority) marketData[cleanSymbol].priority = true; return; }
+        if (marketData[cleanSymbol]?.ws) { 
+            if(isPriority) marketData[cleanSymbol].priority = true; 
+            render(); // 搜尋時立刻渲染
+            return; 
+        }
 
         try {
             const [ticker, k, f] = await Promise.all([
@@ -91,18 +89,18 @@
                 delta: d4, lastPrice: ticker.price, fundingRate: parseFloat(f.lastFundingRate)*100, priority: isPriority, isReady: true, ws: ws,
                 maxDelta: 20000, crossFlag: false 
             };
+            
+            render(); // 確保數據一來就顯示
 
             ws.onmessage = (e) => {
                 const d = JSON.parse(e.data);
                 let p = marketData[cleanSymbol]; if(!p) return;
-                lastHeartbeat = Date.now();
-                p.lastPrice = d.p;
+                lastHeartbeat = Date.now(); p.lastPrice = d.p;
                 const v = parseFloat(d.q) * parseFloat(d.p);
                 p.delta = (p.delta * 0.9995) + (d.m ? -v : v);
                 p.maxDelta = Math.max(p.maxDelta * 0.9999, Math.abs(p.delta), 20000);
                 let t = 50 + (Math.tanh((p.delta/p.maxDelta) * 1.8) * 50);
                 p.winRate = (p.winRate * 0.9) + (t * 0.1);
-                
                 if(!p.t5 || Date.now()-p.t5>8000) { p.avgWinRate5m = (p.avgWinRate5m*0.9)+(p.winRate*0.1); p.t5=Date.now(); }
                 if(!p.t1 || Date.now()-p.t1>30000) { p.avgWinRate1h = (p.avgWinRate1h*0.98)+(p.winRate*0.02); p.t1=Date.now(); }
                 if(!p.t4 || Date.now()-p.t4>120000) { p.avgWinRate4h = (p.avgWinRate4h*0.99)+(p.winRate*0.01); p.t4=Date.now(); }
@@ -111,57 +109,29 @@
                     const now = Date.now();
                     if (!lastPush[cleanSymbol]) lastPush[cleanSymbol] = 0;
                     if (p.avgWinRate5m > p.avgWinRate1h || p.avgWinRate5m > p.avgWinRate4h) p.crossFlag = true;
-
                     if (p.crossFlag && (now - lastPush[cleanSymbol] > 300000)) {
-                        if (p.avgWinRate5m < p.avgWinRate1h) {
-                            sendPush(`🎯 減碼: ${cleanSymbol}`, `5M 跌破 1H 支撐`);
-                            lastPush[cleanSymbol] = now; p.crossFlag = false;
-                        } else if (p.avgWinRate5m < p.avgWinRate4h) {
-                            sendPush(`🚨 清倉: ${cleanSymbol}`, `5M 跌破 4H 趨勢`);
-                            lastPush[cleanSymbol] = now; p.crossFlag = false;
-                        }
+                        if (p.avgWinRate5m < p.avgWinRate1h) { sendPush(`🎯 減碼: ${cleanSymbol}`, `5M 跌破 1H`); lastPush[cleanSymbol] = now; p.crossFlag = false; }
+                        else if (p.avgWinRate5m < p.avgWinRate4h) { sendPush(`🚨 清倉: ${cleanSymbol}`, `5M 跌破 4H`); lastPush[cleanSymbol] = now; p.crossFlag = false; }
                     }
                 }
             };
-        } catch(e) {}
+        } catch(e) { console.error("Stream Error", e); }
     }
 
-    function toggleSniper(s) {
-        if (sniperTargets.has(s)) sniperTargets.delete(s); else sniperTargets.add(s);
-    }
+    function toggleSniper(s) { if (sniperTargets.has(s)) sniperTargets.delete(s); else sniperTargets.add(s); render(); }
 
     function toggleChart(s) {
         const box = document.getElementById(`box-${s}`);
         const containerId = `chart-container-${s}`;
-        
-        if (chartStates[s]) {
-            box.classList.remove('active');
-            setTimeout(() => { box.innerHTML = ''; }, 300);
-            chartStates[s] = false;
-        } else {
-            box.classList.add('active');
-            box.innerHTML = `<div id="${containerId}" style="height:100%; width:100%;"></div>`;
-            new TradingView.widget({
-                "autosize": true,
-                "symbol": "BINANCE:" + s + "PERP",
-                "interval": "1",
-                "timezone": "Asia/Taipei",
-                "theme": "dark",
-                "style": "1",
-                "locale": "zh_TW",
-                "enable_publishing": false,
-                "hide_top_toolbar": true,
-                "hide_legend": true,
-                "save_image": false,
-                "container_id": containerId
-            });
+        if (chartStates[s]) { box.classList.remove('active'); setTimeout(() => { box.innerHTML = ''; }, 300); chartStates[s] = false; } 
+        else {
+            box.classList.add('active'); box.innerHTML = `<div id="${containerId}" style="height:100%; width:100%;"></div>`;
+            new TradingView.widget({ "autosize": true, "symbol": "BINANCE:" + s + "PERP", "interval": "1", "theme": "dark", "style": "1", "hide_top_toolbar": true, "container_id": containerId });
             chartStates[s] = true;
         }
     }
 
-    function removeSymbol(s) {
-        if(marketData[s]) { if(marketData[s].ws) marketData[s].ws.close(); delete marketData[s]; sniperTargets.delete(s); delete chartStates[s]; }
-    }
+    function removeSymbol(s) { if(marketData[s]) { if(marketData[s].ws) marketData[s].ws.close(); delete marketData[s]; sniperTargets.delete(s); delete chartStates[s]; render(); } }
 
     function manualSearch() {
         const input = document.getElementById('search-input');
@@ -171,62 +141,43 @@
 
     function render() {
         const panel = document.getElementById('main-panel');
+        // 核心修正：排序邏輯。優先順序：搜尋過的(Priority) > 狙擊中(Target) > 其他排名
         const sorted = Object.keys(marketData).filter(s => marketData[s].isReady)
-            .sort((a,b) => (sniperTargets.has(a) ? -1 : 1)).slice(0, 16);
+            .sort((a,b) => {
+                let scoreA = (marketData[a].priority ? 2000 : 0) + (sniperTargets.has(a) ? 1000 : 0);
+                let scoreB = (marketData[b].priority ? 2000 : 0) + (sniperTargets.has(b) ? 1000 : 0);
+                return (scoreB - scoreA) || (marketData[b].winRate - marketData[a].winRate);
+            }).slice(0, 20);
 
         const hb = document.getElementById('heartbeat');
         hb.className = (Date.now() - lastHeartbeat < 1000) ? 'hb-active' : '';
 
         sorted.forEach(s => {
             let item = marketData[s]; let card = document.getElementById(`card-${s}`);
-            if (!card) {
-                card = document.createElement('div'); card.id = `card-${s}`;
-                panel.appendChild(card);
-            }
-            
+            if (!card) { card = document.createElement('div'); card.id = `card-${s}`; panel.appendChild(card); }
             const isSniper = sniperTargets.has(s);
             card.className = `card-stat p-4 rounded-lg flex flex-col ${isSniper ? 'sniper-active' : ''}`;
-            
             if (card.querySelector('.stat-header') === null) {
-                card.innerHTML = `
-                    <div onclick="removeSymbol('${s}')" class="del-btn font-bold">×</div>
-                    <div class="stat-header"></div>
+                card.innerHTML = `<div onclick="removeSymbol('${s}')" class="del-btn font-bold">×</div><div class="stat-header"></div>
                     <div class="h-3 w-full win-gradient rounded-sm relative my-2 border border-zinc-900 overflow-hidden">
-                        <div class="h4-pointer" id="h4-${s}"></div>
-                        <div class="h1-pointer" id="h1-${s}"></div>
-                        <div class="avg-pointer" id="avg-${s}"></div>
-                        <div class="win-pointer" id="win-${s}"></div>
+                        <div class="h4-pointer" id="h4-${s}"></div><div class="h1-pointer" id="h1-${s}"></div><div class="avg-pointer" id="avg-${s}"></div><div class="win-pointer" id="win-${s}"></div>
                     </div>
                     <div class="flex justify-between items-center gap-2 mt-1">
                         <button onclick="toggleSniper('${s}')" class="sniper-btn text-[10px] font-bold flex-1 py-1.5 rounded transition-all"></button>
                         <button onclick="toggleChart('${s}')" class="bg-zinc-800 text-zinc-400 text-[10px] font-bold flex-1 py-1.5 rounded hover:bg-zinc-700 hover:text-white">VIEW 1K</button>
-                    </div>
-                    <div id="box-${s}" class="chart-box"></div>
-                `;
+                    </div><div id="box-${s}" class="chart-box"></div>`;
             }
-
-            card.querySelector('.stat-header').innerHTML = `
-                <div class="flex justify-between items-start">
-                    <div>
-                        <div class="font-black text-white italic text-base leading-none">${s.replace('USDT','')}</div>
-                        <div class="text-[10px] text-zinc-500 mt-1.5">$${parseFloat(item.lastPrice).toFixed(4)}</div>
-                    </div>
-                    <div class="text-right">
-                        <div class="text-xl font-black ${item.winRate>50?'text-emerald-500':'text-red-500'}">${item.winRate.toFixed(1)}%</div>
-                        <div class="text-[8px] text-zinc-600 font-bold uppercase mt-1">4H:${item.avgWinRate4h.toFixed(1)} 1H:${item.avgWinRate1h.toFixed(1)}</div>
-                    </div>
-                </div>`;
-            
+            card.querySelector('.stat-header').innerHTML = `<div class="flex justify-between items-start">
+                <div><div class="font-black text-white italic text-base leading-none">${s.replace('USDT','')}</div><div class="text-[10px] text-zinc-500 mt-1.5">$${parseFloat(item.lastPrice).toFixed(4)}</div></div>
+                <div class="text-right"><div class="text-xl font-black ${item.winRate>50?'text-emerald-500':'text-red-500'}">${item.winRate.toFixed(1)}%</div><div class="text-[8px] text-zinc-600 font-bold mt-1">4H:${item.avgWinRate4h.toFixed(1)} 1H:${item.avgWinRate1h.toFixed(1)}</div></div></div>`;
             card.querySelector(`#h4-${s}`).style.left = `${item.avgWinRate4h}%`;
             card.querySelector(`#h1-${s}`).style.left = `${item.avgWinRate1h}%`;
             card.querySelector(`#avg-${s}`).style.left = `${item.avgWinRate5m}%`;
             card.querySelector(`#win-${s}`).style.left = `${item.winRate}%`;
-
             const sBtn = card.querySelector('.sniper-btn');
             sBtn.innerText = isSniper ? '🎯 MONITORING' : '🎯 TARGET';
             sBtn.className = `sniper-btn text-[10px] font-bold flex-1 py-1.5 rounded transition-all ${isSniper ? 'bg-red-600 text-white animate-pulse' : 'bg-zinc-900 text-zinc-600'}`;
         });
-        
         Array.from(panel.children).forEach(c => { if(!sorted.includes(c.id.replace('card-',''))) c.remove(); });
     }
 
