@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>⚡ TRIDENT V5.9 - SNIPER ELITE</title>
+    <title>⚡ TRIDENT V6.0 - SNIPER VISION</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
@@ -12,14 +12,16 @@
         .avg-pointer { width: 2px; height: 32px; background: rgba(255,255,255,0.6); position: absolute; top: -6px; border: 1px dashed #fff; z-index: 30; }
         .h1-pointer { width: 2px; height: 32px; background: #f59e0b; position: absolute; top: -6px; border: 1px dotted #f59e0b; z-index: 20; }
         .h4-pointer { width: 2px; height: 32px; background: #3b82f6; position: absolute; top: -6px; z-index: 10; }
-        .card-stat { background: #0f0f11; border: 1px solid #1f1f23; position: relative; transition: 0.3s; }
-        .sniper-active { border: 2px solid #ef4444 !important; background: #1a0a0a !important; box-shadow: 0 0 20px rgba(239, 68, 68, 0.3); }
+        .card-stat { background: #0f0f11; border: 1px solid #1f1f23; position: relative; transition: 0.3s; height: 320px; } /* 固定高度 */
+        .sniper-active { border: 2px solid #ef4444 !important; background: #1a0a0a !important; }
         .del-btn { opacity: 0; transition: 0.2s; position: absolute; top: 4px; right: 8px; z-index: 50; cursor: pointer; color: #52525b; }
         .card-stat:hover .del-btn { opacity: 1; color: #fff; }
         #heartbeat { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px; }
         .hb-active { background: #22c55e; box-shadow: 0 0 10px #22c55e; }
         .blink { animation: blinker 1.5s linear infinite; }
         @keyframes blinker { 50% { opacity: 0.3; } }
+        /* 圖表暗色濾鏡 */
+        .chart-container { filter: invert(0.9) hue-rotate(180deg) brightness(0.6) contrast(1.2); pointer-events: none; }
     </style>
 </head>
 <body class="flex flex-col h-screen p-4">
@@ -27,15 +29,14 @@
         <div class="flex items-center">
             <div id="heartbeat"></div>
             <div>
-                <h1 class="text-xl font-black text-white italic leading-none">TRIDENT <span class="text-red-500">SNIPER V5.9</span></h1>
-                <p class="text-[9px] text-zinc-500 font-mono mt-1 font-bold uppercase tracking-widest">Target Lockdown & Cross Alert Enabled</p>
+                <h1 class="text-xl font-black text-white italic leading-none">TRIDENT <span class="text-red-500">V6.0 VISION</span></h1>
+                <p class="text-[9px] text-zinc-500 font-mono mt-1 font-bold uppercase tracking-widest">Momentum + 1m Live Chart</p>
             </div>
         </div>
         <div class="flex items-end gap-2">
-            <button onclick="testPush()" class="bg-blue-900/40 border border-blue-500 text-blue-400 text-[10px] px-2 py-1 rounded font-bold hover:bg-blue-600 hover:text-white transition">📢 測試推播</button>
+            <button onclick="testPush()" class="bg-blue-900/40 border border-blue-500 text-blue-400 text-[10px] px-2 py-1 rounded font-bold hover:bg-blue-600 transition">📢 測試推播</button>
             <input type="text" id="search-input" placeholder="SEARCH SYMBOL" class="bg-zinc-900 border border-zinc-700 text-[10px] px-2 py-1 rounded text-white outline-none w-28 uppercase">
             <button onclick="manualSearch()" class="bg-amber-600 hover:bg-amber-500 text-white text-[10px] px-3 py-1 rounded font-bold uppercase">Trace</button>
-            <button onclick="location.reload()" class="bg-zinc-800 text-[10px] px-2 py-1 rounded text-zinc-400">RESET</button>
         </div>
     </div>
 
@@ -47,7 +48,6 @@
     const EXCLUDE = ['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','BNXUSDT'];
     let marketData = {}; 
     let sniperTargets = new Set();
-    let manualExcludes = new Set();
     let lastPush = {};
     let lastHeartbeat = Date.now();
 
@@ -59,7 +59,7 @@
         });
     }
 
-    function testPush() { sendPush("TRIDENT 測試", "推播系統已就緒，狙擊指令待命中！"); alert("測試訊號已發出！"); }
+    function testPush() { sendPush("TRIDENT V6 測試", "圖表已接通，狙擊功能正常！"); alert("測試成功！"); }
 
     async function initStream(symbol, isPriority = false) {
         const cleanSymbol = symbol.toUpperCase().endsWith('USDT') ? symbol.toUpperCase() : symbol.toUpperCase() + 'USDT';
@@ -100,29 +100,19 @@
                 if(!p.t1 || Date.now()-p.t1>30000) { p.avgWinRate1h = (p.avgWinRate1h*0.98)+(p.winRate*0.02); p.t1=Date.now(); }
                 if(!p.t4 || Date.now()-p.t4>120000) { p.avgWinRate4h = (p.avgWinRate4h*0.99)+(p.winRate*0.01); p.t4=Date.now(); }
 
-                // --- 狙擊推播邏輯 (5M 跌破 1H 或 4H) ---
                 if (sniperTargets.has(cleanSymbol)) {
                     const now = Date.now();
                     if (!lastPush[cleanSymbol]) lastPush[cleanSymbol] = 0;
-                    
-                    // 偵測強勢狀態
                     if (p.avgWinRate5m > p.avgWinRate1h || p.avgWinRate5m > p.avgWinRate4h) p.crossFlag = true;
 
                     if (p.crossFlag && (now - lastPush[cleanSymbol] > 300000)) {
                         if (p.avgWinRate5m < p.avgWinRate1h) {
-                            sendPush(`🎯 跌破1H: ${cleanSymbol}`, `5M動能跌破1H支撐！價: ${p.lastPrice}`);
-                            lastPush[cleanSymbol] = now;
-                            p.crossFlag = false;
+                            sendPush(`🎯 減碼通知: ${cleanSymbol}`, `5M 跌破 1H 支撐！`);
+                            lastPush[cleanSymbol] = now; p.crossFlag = false;
                         } else if (p.avgWinRate5m < p.avgWinRate4h) {
-                            sendPush(`🎯 跌破4H: ${cleanSymbol}`, `5M動能跌破4H大趨勢！注意反轉。`);
-                            lastPush[cleanSymbol] = now;
-                            p.crossFlag = false;
+                            sendPush(`🚨 全出通知: ${cleanSymbol}`, `5M 跌破 4H 趨勢！`);
+                            lastPush[cleanSymbol] = now; p.crossFlag = false;
                         }
-                    }
-                    // 資費監控
-                    if (Math.abs(p.fundingRate) >= 0.05 && (now - (lastPush[cleanSymbol+"_F"] || 0) > 3600000)) {
-                        sendPush(`🔥 資費異動: ${cleanSymbol}`, `資費高達 ${p.fundingRate.toFixed(3)}%`);
-                        lastPush[cleanSymbol+"_F"] = now;
                     }
                 }
             };
@@ -130,29 +120,7 @@
     }
 
     function toggleSniper(s) {
-        if (sniperTargets.has(s)) {
-            sniperTargets.delete(s);
-        } else {
-            sniperTargets.add(s);
-            sendPush("🎯 狙擊鎖定", `正在監控 ${s}，若5M跌破1H/4H將立即通知。`);
-        }
-    }
-
-    async function globalScan() {
-        const tickers = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr').then(r=>r.json());
-        const top20 = tickers
-            .filter(s => s.symbol.endsWith('USDT') && !EXCLUDE.includes(s.symbol) && !manualExcludes.has(s.symbol))
-            .sort((a,b) => (parseFloat(b.quoteVolume)*Math.abs(parseFloat(b.priceChangePercent))) - (parseFloat(a.quoteVolume)*Math.abs(parseFloat(a.priceChangePercent))))
-            .slice(0, 20);
-
-        const active = new Set(top20.map(t => t.symbol));
-        Object.keys(marketData).forEach(s => {
-            if (!active.has(s) && !marketData[s].priority && !sniperTargets.has(s)) {
-                if(marketData[s].ws) marketData[s].ws.close();
-                delete marketData[s];
-            }
-        });
-        for(let s of top20) { await initStream(s.symbol); }
+        if (sniperTargets.has(s)) { sniperTargets.delete(s); } else { sniperTargets.add(s); }
     }
 
     function manualSearch() {
@@ -161,62 +129,53 @@
         if (s) { initStream(s, true); input.value = ''; }
     }
 
-    function removeSymbol(s) {
-        if(marketData[s]) { if(marketData[s].ws) marketData[s].ws.close(); delete marketData[s]; manualExcludes.add(s); sniperTargets.delete(s); }
-    }
-
     function render() {
         const panel = document.getElementById('main-panel');
         const sorted = Object.keys(marketData).filter(s => marketData[s].isReady)
-            .sort((a,b) => (sniperTargets.has(a) ? -1 : (sniperTargets.has(b) ? 1 : marketData[b].winRate - marketData[a].winRate))).slice(0, 24);
-
-        const hb = document.getElementById('heartbeat');
-        hb.className = (Date.now() - lastHeartbeat < 1000) ? 'hb-active' : '';
+            .sort((a,b) => (sniperTargets.has(a) ? -1 : 1)).slice(0, 16); // 有圖表，建議放16隻就好
 
         sorted.forEach(s => {
             let item = marketData[s]; let card = document.getElementById(`card-${s}`);
-            if (!card) { card = document.createElement('div'); card.id = `card-${s}`; panel.appendChild(card); }
+            if (!card) {
+                card = document.createElement('div'); card.id = `card-${s}`;
+                panel.appendChild(card);
+            }
             
             const isSniper = sniperTargets.has(s);
-            let isFundingHigh = Math.abs(item.fundingRate) >= 0.05;
-            let sig = item.winRate > item.avgWinRate5m+3 ? 'signal-buy' : (item.winRate < item.avgWinRate5m-3 ? 'signal-sell' : '');
-            
-            card.className = `card-stat p-4 rounded-lg ${isSniper ? 'sniper-active' : sig}`;
+            card.className = `card-stat p-3 rounded-lg flex flex-col ${isSniper ? 'sniper-active' : ''}`;
             card.innerHTML = `
-                <div onclick="removeSymbol('${s}')" class="del-btn font-bold text-lg">×</div>
-                <div class="flex justify-between items-start mb-2">
+                <div class="flex justify-between items-start mb-1">
                     <div>
-                        <div class="font-black text-white italic text-base leading-none">${s.replace('USDT','')}</div>
-                        <div class="text-[9px] text-zinc-500 mt-2">$${parseFloat(item.lastPrice).toLocaleString(undefined, {minimumFractionDigits: 4})}</div>
+                        <div class="font-black text-white italic text-sm">${s.replace('USDT','')}</div>
+                        <div class="text-[9px] text-zinc-500 mt-1">$${parseFloat(item.lastPrice).toFixed(4)}</div>
                     </div>
                     <div class="text-right">
-                        <div class="flex gap-1 text-[7.5px] font-bold mb-1 uppercase opacity-60">
-                            <span class="text-blue-500">4H:${item.avgWinRate4h.toFixed(1)}</span>
-                            <span class="text-amber-500">1H:${item.avgWinRate1h.toFixed(1)}</span>
-                        </div>
-                        <div class="text-xl font-black ${item.winRate>50?'text-emerald-500':'text-red-500'}">${item.winRate.toFixed(1)}%</div>
-                        ${isFundingHigh ? `<div class="text-[8px] text-amber-500 font-bold blink mt-1">FR ${item.fundingRate.toFixed(3)}%</div>` : ''}
+                        <div class="text-base font-black ${item.winRate>50?'text-emerald-500':'text-red-500'}">${item.winRate.toFixed(1)}%</div>
+                        <button onclick="toggleSniper('${s}')" class="text-[8px] font-bold px-2 py-0.5 rounded mt-1 ${isSniper?'bg-red-600 text-white':'bg-zinc-800 text-zinc-400'}">TARGET</button>
                     </div>
                 </div>
-                <div class="h-4 w-full win-gradient rounded-sm relative mb-2 border border-zinc-900 overflow-hidden">
+                <div class="h-3 w-full win-gradient rounded-sm relative mb-2 border border-zinc-900 overflow-hidden">
                     <div class="h4-pointer" style="left:${item.avgWinRate4h}%"></div>
                     <div class="h1-pointer" style="left:${item.avgWinRate1h}%"></div>
                     <div class="avg-pointer" style="left:${item.avgWinRate5m}%"></div>
                     <div class="win-pointer" style="left:${item.winRate}%"></div>
                 </div>
-                <div class="flex justify-between items-center mt-1">
-                    <button onclick="toggleSniper('${s}')" class="text-[9px] font-bold px-3 py-1 rounded transition-all ${isSniper ? 'bg-red-600 text-white animate-pulse' : 'bg-zinc-800 text-zinc-400 hover:text-white'}">
-                        ${isSniper ? '🎯 MONITORING' : '🎯 SNIPE'}
-                    </button>
-                    <div class="text-[9px] text-zinc-600 font-mono">$${(Math.abs(item.delta)/1000).toFixed(1)}K</div>
-                </div>`;
+                <div class="flex-grow rounded bg-black overflow-hidden relative chart-container">
+                    <iframe 
+                        src="https://www.tradingview.com/chart/?symbol=BINANCE:${s}PERP&interval=1&theme=dark&style=1"
+                        style="width: 100%; height: 300px; margin-top: -100px; border: none;">
+                    </iframe>
+                </div>
+            `;
         });
-        Array.from(panel.children).forEach(c => { if(!sorted.includes(c.id.replace('card-',''))) c.remove(); });
     }
 
-    globalScan();
-    setInterval(render, 500); 
-    setInterval(globalScan, 60000);
+    setInterval(render, 1000); 
+    setInterval(async () => {
+        const tickers = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr').then(r=>r.json());
+        const top = tickers.filter(s => s.symbol.endsWith('USDT') && !EXCLUDE.includes(s.symbol)).sort((a,b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume)).slice(0, 12);
+        for(let s of top) { await initStream(s.symbol); }
+    }, 60000);
     document.getElementById('search-input').addEventListener('keypress', (e) => { if(e.key === 'Enter') manualSearch(); });
 </script>
 </body>
