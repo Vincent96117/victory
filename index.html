@@ -972,4 +972,254 @@ function formatAiCN(ai){
   const biasCls = (ai?.bias === "LONG") ? "ok font-bold" : "muted";
 
   const notes = Array.isArray(ai?.notes) ? ai.notes.slice(0,4) : [];
-  const notesHtml = notes.
+  const notesHtml = notes.length ? notes.map(x=>`• ${escapeHtml(String(x))}`).join("<br/>") : "（無）";
+
+  return `
+    <div class="text-[12px] text-white font-bold">AI 判讀（中文）</div>
+    <div class="text-[11px] mono mt-2 leading-relaxed">
+      <div>方向：<span class="${biasCls}">${bias}</span>｜信心：<span class="text-white font-bold">${conf}</span>/100</div>
+      <div>型態：<span class="text-white">${escapeHtml(String(patt))}</span></div>
+      <div>預計表態：<span class="text-white font-bold">${escapeHtml(String(eta))}</span></div>
+      <div class="mt-2">觸發價：<span class="text-white">${escapeHtml(String(trig))}</span>｜<span class="muted">${escapeHtml(ai?.trigger?.logic || "")}</span></div>
+      <div>進場：<span class="text-white">${escapeHtml(String(entry))}</span>｜<span class="muted">${escapeHtml(ai?.entry?.logic || "")}</span></div>
+      <div>止損：<span class="text-white">${escapeHtml(String(stop))}</span>｜<span class="muted">${escapeHtml(ai?.stop?.logic || "")}</span></div>
+      <div>止盈：<span class="text-white">${escapeHtml(String(tps || "（未提供）"))}</span></div>
+      <div>失效條件：<span class="text-white">${escapeHtml(String(ai?.invalidation || "（未提供）"))}</span></div>
+      <div class="muted mt-2">備註：<br/>${notesHtml}</div>
+    </div>
+  `;
+}
+
+/* ===================== Gemini actions ===================== */
+async function analyzeOne(sym){
+  const now = nowMs();
+  const lastTs = lastGeminiSymAt.get(sym) || 0;
+  if (now - lastTs < CFG.GEMINI.SYMBOL_COOLDOWN_MS) return;
+
+  // show "analyzing..."
+  aiBySym.set(sym, normalizeAi({
+    symbol:sym, bias:"NEUTRAL", confidence:0, pattern:"chop",
+    eta_minutes:{min:0,max:0,logic:"分析中…"},
+    trigger:{price: stOf(sym).lastP || 0, logic:"-"},
+    entry:{type:"market", price: stOf(sym).lastP || 0, logic:"-"},
+    stop:{price: stOf(sym).lastP || 0, logic:"-"},
+    takeProfit:[],
+    invalidation:"-",
+    notes:["分析中…"]
+  }, sym));
+  render();
+
+  try{
+    const res = await callGeminiFor(sym);
+    aiBySym.set(sym, res);
+    lastGeminiSymAt.set(sym, nowMs());
+    render();
+  }catch(e){
+    const st = stOf(sym);
+    const is429 = String(e.message||"").includes("429");
+    const msg = is429 ? "Gemini 配額/頻率限制（429）" : "Gemini 呼叫失敗";
+    aiBySym.set(sym, normalizeAi({
+      symbol:sym, bias:"NEUTRAL", confidence:0, pattern:"chop",
+      eta_minutes:{min:0,max:0,logic:msg},
+      trigger:{price: st.lastP||0, logic:"-"},
+      entry:{type:"market", price: st.lastP||0, logic:msg},
+      stop:{price: st.lastP||0, logic:"-"},
+      takeProfit:[],
+      invalidation:"-",
+      notes:[String(e.message || e)]
+    }, sym));
+    lastGeminiSymAt.set(sym, nowMs());
+    render();
+  }
+}
+
+async function analyzeTop(){
+  const pick = displayList.slice(0, CFG.GEMINI.TOPK).map(x=>x.sym);
+  for (const sym of pick){
+    await analyzeOne(sym);
+  }
+}
+
+/* ===================== UI / Render ===================== */
+function render(){
+  const alive = (nowMs() - lastHeartbeat) < 5000;
+  document.getElementById('hb').className = `inline-block w-2 h-2 rounded-full ${alive ? 'bg-emerald-500' : 'bg-zinc-600'}`;
+
+  const now = nowMs();
+  const freezeLeft = Math.max(0, pinnedUntil - now);
+  document.getElementById('freeze').innerText = pinnedTop5.length ? `${Math.ceil(freezeLeft/1000)}s` : "-";
+
+  const autoOn = !!getGeminiKey() && (now >= geminiBlockedUntil);
+  document.getElementById('autoOn').innerText = autoOn ? "ON" : "OFF";
+
+  const zReady = [...S.values()].filter(x => x.volZ !== null).length;
+  const lockInfo = lockedSym ? `LOCK=${lockedSym}(${Math.floor((now-lockedAt)/1000)}s)` : "LOCK=-";
+  const blockInfo = (now < geminiBlockedUntil) ? `GEMINI_BLOCK=${Math.ceil((geminiBlockedUntil-now)/1000)}s` : "GEMINI_OK";
+
+  document.getElementById('status').innerText =
+    `universe=${symbolsAll.length} | states=${S.size} | zReady=${zReady} | candidates=${candidates.length} | watch=${watchPool.length} | ${lockInfo} | ${blockInfo} | lastErr=${geminiLastErr ? geminiLastErr.slice(0,80) : "-"}`;
+
+  const wrap = document.getElementById('top5');
+  wrap.innerHTML = "";
+
+  for (let i=0; i<displayList.length; i++){
+    const row = displayList[i];
+    const sym = row.sym;
+    const st = stOf(sym);
+    const isLocked = sym === lockedSym;
+    const isTop1 = i === 0;
+
+    const ai = aiBySym.get(sym);
+    const aiHtml = ai ? formatAiCN(ai) : `<div class="text-[11px] muted">尚未分析：按右上「Gemini」或「分析 Top」</div>`;
+
+    const badges = [];
+    if (isLocked) badges.push(`<span class="badge text-emerald-300">🎯 最強鎖定</span>`);
+    if (isTop1) badges.push(`<span class="badge text-blue-300">🏆 第1名</span>`);
+    badges.push(`<span class="badge muted">score ${fmt(row.score,2)}</span>`);
+
+    // “資訊缺失”現在應該大幅改善：flow 會即時出
+    const flowReady = (st.vol5mQuote !== null);
+    if (!flowReady) badges.push(`<span class="badge warn">流量窗累積中</span>`);
+    if (nowMs() < geminiBlockedUntil) badges.push(`<span class="badge warn">Gemini 429 暫停</span>`);
+
+    const card = document.createElement('div');
+    card.className = `p-3 rounded-lg border border-zinc-800 bg-black/20 ${isLocked ? 'locked' : ''} ${isTop1 ? 'top1' : ''}`;
+
+    card.innerHTML = `
+      <div class="flex flex-col lg:flex-row gap-3">
+        <!-- LEFT -->
+        <div class="flex-1">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="text-white font-black text-lg">${sym}</div>
+              <div class="text-[11px] muted mono mt-1">${badges.join(" ")}</div>
+              <div class="text-[11px] muted mono mt-1">型態標籤：${(st.patternTags||[]).join(" / ") || "-"}</div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button class="px-3 py-2 rounded text-[12px] font-black bg-zinc-800 hover:bg-zinc-700 text-white">
+                Gemini
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 md:grid-cols-3 gap-2 mt-3 text-[11px] mono">
+            <div class="pill rounded px-2 py-1">波動異常Z：<span class="text-white">${fmt(st.volZ,2)}</span></div>
+            <div class="pill rounded px-2 py-1">資費斜率Z：<span class="text-white">${fmt(st.fundZ,2)}</span></div>
+            <div class="pill rounded px-2 py-1">5分鐘漲跌：<span class="text-white">${pct(st.ret5mPct,2)}</span></div>
+
+            <div class="pill rounded px-2 py-1">溢價(標記-指數)：<span class="text-white">${pct(st.premNow,3)}</span></div>
+            <div class="pill rounded px-2 py-1">主動買入比例(5m)：<span class="text-white">${fmt(st.imb5m,3)}</span></div>
+            <div class="pill rounded px-2 py-1">主動買入比例(4h)：<span class="text-white">${fmt(st.imb4h,3)}</span></div>
+
+            <div class="pill rounded px-2 py-1">主動買入差額(5m,金額)：<span class="text-white">${fmtInt(st.delta5mQuote)}</span></div>
+            <div class="pill rounded px-2 py-1">主動買入差額(4h,金額)：<span class="text-white">${fmtInt(st.delta4hQuote)}</span></div>
+            <div class="pill rounded px-2 py-1">差額異常Z(5m)：<span class="text-white">${fmt(st.delta5mZ,2)}</span></div>
+
+            <div class="pill rounded px-2 py-1">成交量異常Z(5m)：<span class="text-white">${fmt(st.vol5mZ,2)}</span></div>
+            <div class="pill rounded px-2 py-1">OI異常Z(5m)：<span class="text-white">${fmt(st.oi.oi5mZ,2)}</span></div>
+            <div class="pill rounded px-2 py-1">OI變化(4h)：<span class="text-white">${fmt(st.oi.dOi4h,2)}</span></div>
+
+            <div class="pill rounded px-2 py-1">距高/低點(%)：<span class="text-white">${fmt(st.dist.toHighPct,2)}/${fmt(st.dist.toLowPct,2)}</span></div>
+            <div class="pill rounded px-2 py-1">關鍵位(1m-20)：<span class="text-white">${fmt(st.levels.swingLow,6)} ~ ${fmt(st.levels.swingHigh,6)}</span></div>
+            <div class="pill rounded px-2 py-1">中位(mid)：<span class="text-white">${fmt(st.levels.mid,6)}</span></div>
+          </div>
+        </div>
+
+        <!-- RIGHT -->
+        <div class="w-full lg:w-[420px] shrink-0">
+          <div class="p-3 rounded-lg border border-zinc-800 bg-black/30 h-full">
+            ${aiHtml}
+          </div>
+        </div>
+      </div>
+    `;
+
+    card.querySelector('button').onclick = async () => { await analyzeOne(sym); };
+    wrap.appendChild(card);
+  }
+}
+
+/* ===================== PIPELINE ===================== */
+async function pipelineTick(){
+  computeCandidates();
+  connectAggForWatchPool();
+  sampleFlow();
+  await refreshOI();
+  updateRank();
+}
+
+/* ===================== Boot / UI binds ===================== */
+document.getElementById('saveKeyBtn').onclick = saveGeminiKey;
+document.getElementById('clearKeyBtn').onclick = clearGeminiKey;
+document.getElementById('resetBtn').onclick = () => location.reload();
+document.getElementById('analyzeBtn').onclick = analyzeTop;
+
+document.getElementById('testGeminiBtn').onclick = async () => {
+  try{
+    const key = getGeminiKey();
+    if(!key) return alert("先貼上 Gemini key 再測試（可按 Save）");
+    if (nowMs() < geminiBlockedUntil) return alert("目前被 429 backoff 暫停，稍後再試");
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${CFG.GEMINI.MODEL}:generateContent`;
+    const res = await fetch(url,{
+      method:"POST",
+      headers:{ "Content-Type":"application/json", "x-goog-api-key": key },
+      body: JSON.stringify({
+        contents:[{role:"user",parts:[{text:`只回傳JSON：{"ok":true,"ts":${nowMs()}}`}]}],
+        generationConfig:{ temperature:0.1, max_output_tokens: 80, response_mime_type:"application/json" }
+      })
+    });
+    const t = await res.text();
+    console.log("Gemini test raw:", t);
+
+    if(!res.ok){
+      if (res.status === 429) geminiBlockedUntil = nowMs() + CFG.GEMINI.BACKOFF_429_MS;
+      return alert(`Gemini FAIL: HTTP ${res.status}（看 Console）`);
+    }
+    alert("Gemini OK ✅（看 Console 可確認回應）");
+  }catch(e){
+    alert("Gemini error: " + e.message);
+  }
+};
+
+(function initKey(){
+  const k = localStorage.getItem('GEMINI_API_KEY') || "";
+  if (k) document.getElementById('geminiKey').value = k;
+})();
+
+(async function main(){
+  try{
+    await loadUniverse();
+  }catch(e){
+    document.getElementById('status').innerText = `exchangeInfo 失敗: ${e.message}`;
+    return;
+  }
+
+  connectMark();
+
+  setInterval(sampleMarkMetrics, 1000);      // mark metrics
+  setInterval(render, 1000);                // ui
+  setInterval(() => { pipelineTick().catch(()=>{}); }, 10_000); // pipeline
+
+  // auto Gemini: 2分鐘一次，且只問 TopK
+  setInterval(() => {
+    const now = nowMs();
+    const key = getGeminiKey();
+    if (!key) return;
+    if (now < geminiBlockedUntil) return;
+    if (displayList.length < CFG.GEMINI.TOPK) return;
+    if (now - lastAutoGeminiAt < CFG.GEMINI.AUTO_INTERVAL_MS) return;
+
+    const topHash = hashStr(displayList.slice(0, CFG.GEMINI.TOPK).map(x=>x.sym).join('|') + '|' + (lockedSym||''));
+    if (topHash === lastTopHashGemini) return;
+
+    lastAutoGeminiAt = now;
+    lastTopHashGemini = topHash;
+
+    analyzeTop();
+  }, CFG.GEMINI.AUTO_CHECK_MS);
+
+})();
+</script>
+</body>
+</html>
