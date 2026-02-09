@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>TRIDENT V7 - Anomaly-first Long Scanner + Gemini</title>
+  <title>TRIDENT V7-C | Pre-Break (1~3m) Long-only + Gemini</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body { background:#050505; color:#d4d4d8; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace; }
@@ -44,23 +44,28 @@
       <div class="flex items-center gap-3">
         <span id="gemDot" class="dot dotGray"></span>
         <div>
-          <div class="text-xl font-black italic text-white">TRIDENT <span class="text-emerald-400">V7</span></div>
-          <div class="small">Anomaly-first LONG scanner → Top5（最強鎖定置頂）→ Gemini（Top3 only）</div>
+          <div class="text-xl font-black italic text-white">
+            TRIDENT <span class="text-emerald-400">V7-C</span>
+            <span class="text-zinc-500 text-sm font-bold">Pre-Break 1~3m · LONG ONLY</span>
+          </div>
+          <div class="small">
+            目標：只抓「突破前 1~3 分鐘」：貼壓力(20高) + 1m量爬升 + 1m/5m主動買入差額為正 + anti-chase
+          </div>
         </div>
       </div>
 
       <div class="flex flex-wrap items-center gap-2">
-        <input id="keyInput" type="password" placeholder="貼上 Gemini API Key（不會上傳到我的伺服器）"
+        <input id="keyInput" type="password" placeholder="貼上 Gemini API Key（只存本機 localStorage）"
           class="w-[360px] max-w-full bg-zinc-900 border border-zinc-700 text-[12px] px-3 py-2 rounded text-white outline-none" />
         <button id="btnSaveKey" class="btn px-3 py-2 rounded text-[12px] font-bold">Save</button>
         <button id="btnClearKey" class="btnDanger px-3 py-2 rounded text-[12px] font-bold">Clear</button>
 
         <button id="btnTestGemini" class="btn2 px-3 py-2 rounded text-[12px] font-bold">Test Gemini</button>
-        <button id="btnAnalyzeTop" class="btn2 px-3 py-2 rounded text-[12px] font-bold">Analyze Top3 (Gemini)</button>
+        <button id="btnAnalyzeTop" class="btn2 px-3 py-2 rounded text-[12px] font-bold">Analyze Top3</button>
 
         <label class="flex items-center gap-2 text-[12px] select-none">
           <input id="autoToggle" type="checkbox" class="accent-emerald-500" />
-          Auto（只在🟧/🟩才打）
+          Auto（只在🟧點火才打）
         </label>
 
         <button id="btnReset" class="btn px-3 py-2 rounded text-[12px] font-bold">RESET</button>
@@ -81,7 +86,7 @@
   <!-- Main -->
   <div class="card rounded-xl p-4 mb-4">
     <div class="flex items-center justify-between">
-      <div class="text-white font-black">Top 5 候選（最強鎖定置頂）</div>
+      <div class="text-white font-black">Top 5（最強鎖定置頂，除非有人明顯更強才換）</div>
       <div class="small mono">Universe：<span id="univN">-</span>　|　Ready：<span id="readyN">-</span></div>
     </div>
   </div>
@@ -93,22 +98,32 @@
      * CONFIG
      ***********************/
     const BINANCE = "https://fapi.binance.com";
-    const MODEL = "gemini-2.5-flash";          // 你要換也行
-    const MAX_OUTPUT_TOKENS = 420;             // 你說的 max_output_tokens
-    const TOPK_ANALYZE = 3;                    // 只分析 Top3
-    const AUTO_INTERVAL_MS = 120000;           // 2 分鐘
-    const SCAN_INTERVAL_MS = 6000;             // 掃描節奏（別太快，避免 Binance rate limit）
-    const UNIVERSE_SIZE = 80;                  // 只取成交額大的前 80 當 universe（避免全市場爆請求）
+    const MODEL = "gemini-2.5-flash";
+    const MAX_OUTPUT_TOKENS = 420;
+    const TOPK_ANALYZE = 3;
+
+    // 掃描節奏（別太快，避免 Binance rate limit）
+    const AUTO_INTERVAL_MS = 120000;     // 2 分鐘
+    const SCAN_INTERVAL_MS = 6000;       // 6 秒更新一批
+    const UNIVERSE_SIZE = 80;            // 只取成交額大的前 80
     const EXCLUDE = new Set(["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"]);
 
-    // 只做多：趨勢/追高控制（你可再調）
-    const CHASE_RET5M_MAX = 1.20;              // 5m 漲太多 → 追高懲罰
-    const REQUIRE_BULL_TREND = true;           // true：只要 EMA20>EMA50 且 價在 EMA20 上才加分
+    // Long-only：追高限制
+    const CHASE_RET5M_MAX = 1.20;        // 5m 漲太多視為追高
+    const REQUIRE_BULL_TREND = true;     // EMA20>EMA50 且 價在EMA20上 才加分/Confirm更嚴
+
+    // === C 模式：突破前 1~3 分鐘（Pre-Break） ===
+    const PREBREAK_TO_HIGH_MAX_PCT = 0.18;   // 距離20高點 <= 0.18%
+    const PREBREAK_RET5M_MIN = -0.05;        // 5m 不要太弱
+    const PREBREAK_RET5M_MAX = 0.60;         // 5m 不要已經噴
+    const PREBREAK_VOL1M_RATIO_MIN = 1.6;    // 1m量 / 20m中位數 >= 1.6
+    const PREBREAK_VOL1M_Z_MIN = 1.2;        // 1m量Z >= 1.2
+    const PREBREAK_ACTIVE1M_POS = 0;         // 1m主動買入差額 > 0
 
     // Gemini 節流
-    const PER_SYMBOL_COOLDOWN_MS = 60000;      // 同一幣 60 秒內不重打
-    const GLOBAL_MIN_GAP_MS = 1400;            // Gemini 連打間隔（避免瞬間 429）
-    const COOLDOWN_ON_429_MS = 5 * 60 * 1000;  // 撞 429 就全站冷卻 5 分鐘
+    const PER_SYMBOL_COOLDOWN_MS = 60000;      // 同幣 60s 冷卻
+    const GLOBAL_MIN_GAP_MS = 1400;            // Gemini 連打間隔
+    const COOLDOWN_ON_429_MS = 5 * 60 * 1000;  // 429 全站冷卻 5m
 
     /***********************
      * STATE
@@ -124,7 +139,6 @@
       rrIdx: 0,
       symbols: new Map(),     // symbol -> data
       locked: null,           // 鎖定最強
-      lastRender: 0,
     };
 
     /***********************
@@ -132,6 +146,9 @@
      ***********************/
     const $ = (id) => document.getElementById(id);
     const panel = $("panel");
+    $("modelName").innerText = MODEL;
+    $("maxOut").innerText = String(MAX_OUTPUT_TOKENS);
+    $("topK").innerText = String(TOPK_ANALYZE);
 
     function setStatus(t) { $("statusLine").innerText = "status: " + t; }
     function setDot(mode) {
@@ -161,7 +178,6 @@
       updateKeyUi();
     }
     function saveKeyFromInput() {
-      // 只存你輸入的原始 key：如果你看到的是 ••••，代表你沒重新貼上
       const raw = $("keyInput").value.trim();
       if (!raw || raw.includes("••••")) {
         setStatus("請重新貼上完整 Key（不要是 ••••）");
@@ -190,9 +206,9 @@
     }
 
     /***********************
-     * BINANCE FETCH
+     * UTILS
      ***********************/
-    async function fetchJSON(url, timeoutMs=8000) {
+    async function fetchJSON(url, timeoutMs=9000) {
       const ac = new AbortController();
       const t = setTimeout(() => ac.abort(), timeoutMs);
       try {
@@ -206,28 +222,6 @@
       } finally {
         clearTimeout(t);
       }
-    }
-
-    async function refreshUniverse() {
-      const r = await fetchJSON(`${BINANCE}/fapi/v1/ticker/24hr`);
-      if (!r.ok || !Array.isArray(r.data)) {
-        setStatus("Binance 24hr tickers 讀取失敗");
-        return;
-      }
-      const all = r.data
-        .filter(x => x.symbol && x.symbol.endsWith("USDT") && !EXCLUDE.has(x.symbol))
-        .map(x => ({
-          symbol: x.symbol,
-          qv: Number(x.quoteVolume || 0),
-        }))
-        .filter(x => x.qv > 5_000_000)      // 太小的跳過，避免浪費
-        .sort((a,b) => b.qv - a.qv)
-        .slice(0, UNIVERSE_SIZE)
-        .map(x => x.symbol);
-
-      S.universe = all;
-      $("univN").innerText = String(all.length);
-      setStatus("Universe refreshed: " + all.length);
     }
 
     function ema(values, period) {
@@ -250,7 +244,38 @@
       return (x - m)/s;
     }
 
-    // 核心：抓一個 symbol 的 1m K 線 + funding/premium + OI
+    function median(arr) {
+      if (!arr.length) return 0;
+      const a = [...arr].sort((x,y)=>x-y);
+      const m = Math.floor(a.length/2);
+      return a.length % 2 ? a[m] : (a[m-1] + a[m]) / 2;
+    }
+
+    /***********************
+     * UNIVERSE
+     ***********************/
+    async function refreshUniverse() {
+      const r = await fetchJSON(`${BINANCE}/fapi/v1/ticker/24hr`, 12000);
+      if (!r.ok || !Array.isArray(r.data)) {
+        setStatus("Binance 24hr tickers 讀取失敗");
+        return;
+      }
+      const all = r.data
+        .filter(x => x.symbol && x.symbol.endsWith("USDT") && !EXCLUDE.has(x.symbol))
+        .map(x => ({ symbol: x.symbol, qv: Number(x.quoteVolume || 0) }))
+        .filter(x => x.qv > 5_000_000)
+        .sort((a,b) => b.qv - a.qv)
+        .slice(0, UNIVERSE_SIZE)
+        .map(x => x.symbol);
+
+      S.universe = all;
+      $("univN").innerText = String(all.length);
+      setStatus("Universe refreshed: " + all.length);
+    }
+
+    /***********************
+     * CORE: UPDATE SYMBOL
+     ***********************/
     async function updateSymbol(symbol) {
       const st = S.symbols.get(symbol) || {
         symbol,
@@ -260,10 +285,9 @@
         stageReason: "",
         last: {},
         hist: {
-          vol5m: [],
-          ret5m: [],
           oi: [],
           tsOi: [],
+          oi5m: [],
         },
         ai: {
           lastAt: 0,
@@ -275,9 +299,9 @@
       };
 
       const [k, p, oi] = await Promise.all([
-        fetchJSON(`${BINANCE}/fapi/v1/klines?symbol=${symbol}&interval=1m&limit=240`, 9000),
-        fetchJSON(`${BINANCE}/fapi/v1/premiumIndex?symbol=${symbol}`, 7000),
-        fetchJSON(`${BINANCE}/fapi/v1/openInterest?symbol=${symbol}`, 7000),
+        fetchJSON(`${BINANCE}/fapi/v1/klines?symbol=${symbol}&interval=1m&limit=240`, 12000),
+        fetchJSON(`${BINANCE}/fapi/v1/premiumIndex?symbol=${symbol}`, 9000),
+        fetchJSON(`${BINANCE}/fapi/v1/openInterest?symbol=${symbol}`, 9000),
       ]);
 
       if (!k.ok || !Array.isArray(k.data)) {
@@ -297,20 +321,17 @@
       const c_5m  = closes[closes.length-6] ?? closes[0];
       const ret5m = (lastC - c_5m) / c_5m * 100;
 
-      // 5m 成交額與異常（跟自己 4h 的 5m 分佈比）
+      // === 5m 成交額異常（跟自己 4h 的 5m 分佈比） ===
       const win5mQuote = [];
-      for (let i=0;i<240;i+=5) {
-        const s = quoteV.slice(i,i+5).reduce((a,b)=>a+b,0);
-        win5mQuote.push(s);
-      }
+      for (let i=0;i<240;i+=5) win5mQuote.push(quoteV.slice(i,i+5).reduce((a,b)=>a+b,0));
       const last5mVol = quoteV.slice(-5).reduce((a,b)=>a+b,0);
-      const msVol = meanStd(win5mQuote.slice(0,-1)); // 不含最後一段避免自我污染
-      const volZ = zscore(last5mVol, msVol.m, msVol.s);
+      const msVol5 = meanStd(win5mQuote.slice(0,-1));
+      const volZ5 = zscore(last5mVol, msVol5.m, msVol5.s);
 
-      // 主動買入差額（5m / 4h）：(takerBuyQuote - takerSellQuote) = 2*takerBuyQuote - totalQuote
+      // === 主動買入差額（5m / 4h） ===
       const sumQ5 = quoteV.slice(-5).reduce((a,b)=>a+b,0);
       const sumT5 = takerQ.slice(-5).reduce((a,b)=>a+b,0);
-      const activeDiff5m = (2*sumT5 - sumQ5);                 // 金額正 → 主動買多
+      const activeDiff5m = (2*sumT5 - sumQ5);
       const activeRatio5m = sumQ5 > 0 ? (sumT5 / sumQ5) : null;
 
       const sumQ4 = quoteV.reduce((a,b)=>a+b,0);
@@ -318,15 +339,12 @@
       const activeDiff4h = (2*sumT4 - sumQ4);
       const activeRatio4h = sumQ4 > 0 ? (sumT4 / sumQ4) : null;
 
-      // EMA 趨勢（只做多）
+      // === 趨勢 EMA（Long-only） ===
       const ema20 = ema(closes.slice(-60), 20);
       const ema50 = ema(closes.slice(-120), 50);
       const trendOk = (ema20 && ema50) ? (ema20 > ema50 && lastC >= ema20) : false;
 
-      // Anti-chase：噴太高就扣分
-      const chasePenalty = Math.max(0, ret5m - CHASE_RET5M_MAX) * 8;
-
-      // Premium / Funding
+      // === Premium / Funding ===
       let premiumPct = null, fundingPct = null;
       if (p.ok && p.data) {
         const mp = Number(p.data.markPrice || 0);
@@ -335,92 +353,110 @@
         fundingPct = Number(p.data.lastFundingRate || 0) * 100;
       }
 
-      // OI：5m 變化 + 4h 變化（用前端快照，不用一直打 hist API）
+      // === OI（前端快照累積） ===
       const oiNow = (oi.ok && oi.data) ? Number(oi.data.openInterest || 0) : null;
       let oi5mChg = null;
       let oi4hChg = null;
+      let oiZ5 = 0;
 
       const tNow = Date.now();
       if (oiNow !== null) {
         st.hist.oi.push(oiNow);
         st.hist.tsOi.push(tNow);
 
-        // 5m 之前的 snapshot
         const t5 = tNow - 5*60*1000;
         for (let i=st.hist.tsOi.length-1;i>=0;i--) {
           if (st.hist.tsOi[i] <= t5) { oi5mChg = oiNow - st.hist.oi[i]; break; }
         }
-
-        // 4h 之前的 snapshot
         const t4 = tNow - 4*60*60*1000;
         for (let i=st.hist.tsOi.length-1;i>=0;i--) {
           if (st.hist.tsOi[i] <= t4) { oi4hChg = oiNow - st.hist.oi[i]; break; }
         }
 
-        // 控制歷史長度（保留 6 小時）
         const tKeep = tNow - 6*60*60*1000;
         while (st.hist.tsOi.length && st.hist.tsOi[0] < tKeep) {
           st.hist.tsOi.shift(); st.hist.oi.shift();
         }
+
+        if (oi5mChg !== null) {
+          st.hist.oi5m.push(oi5mChg);
+          if (st.hist.oi5m.length > 120) st.hist.oi5m.shift();
+          const msOi = meanStd(st.hist.oi5m.slice(0,-1));
+          oiZ5 = zscore(oi5mChg, msOi.m, msOi.s);
+        }
       }
 
-      // OI 異常（跟自己最近 1 小時的 5m 變化分佈比）
-      // 這裡用「oi5mChg」本身的 rolling Z（前端要先累積，剛開始會接近 0）
-      if (oi5mChg !== null) {
-        st.hist.oi5m = st.hist.oi5m || [];
-        st.hist.oi5m.push(oi5mChg);
-        if (st.hist.oi5m.length > 120) st.hist.oi5m.shift();
-      }
-      const msOi = meanStd((st.hist.oi5m || []).slice(0,-1));
-      const oiZ5 = (oi5mChg !== null) ? zscore(oi5mChg, msOi.m, msOi.s) : 0;
+      // === Pre-Break 核心：1m量爬升 + 1m主動買入差額 + 貼近20高 ===
+      const last1mVol = quoteV[quoteV.length - 1] ?? 0;
+      const vol20 = quoteV.slice(-21, -1);
+      const vol20Med = median(vol20);
+      const vol1mRatio = vol20Med > 0 ? (last1mVol / vol20Med) : 0;
 
-      // 成交量異常（5m）：跟自己 4h 的 5m 分佈比
-      const volZ5 = volZ;
+      const msVol1m = meanStd(vol20);
+      const vol1mZ = zscore(last1mVol, msVol1m.m, msVol1m.s);
 
-      // 建立三段燈號（只做多）
-      // Setup：波動/量異常 + 主動買偏多（或至少不偏空）
-      // Ignite：Setup + OI 5m 異常正向 或 主動買差額強
-      // Confirm：Ignite + 破區間/趨勢確認（ret5m 小幅正 & 不追高）
+      const q1 = quoteV[quoteV.length - 1] ?? 0;
+      const t1 = takerQ[takerQ.length - 1] ?? 0;
+      const activeDiff1m = (2 * t1 - q1);
+
       const range20High = Math.max(...highs.slice(-20));
       const range20Low  = Math.min(...lows.slice(-20));
-      const breakUp = lastC >= range20High * 0.999; // 接近突破
-      const notChasing = ret5m <= CHASE_RET5M_MAX;
+      const toHighPct = (range20High > 0) ? ((range20High - lastC) / lastC * 100) : 999;
+      const nearHigh = (toHighPct >= 0 && toHighPct <= PREBREAK_TO_HIGH_MAX_PCT);
+      const brokeHigh = (lastC > range20High * 1.0003); // 0.03%
+
+      // === Stage（C 模式） ===
+      const retOk = (ret5m >= PREBREAK_RET5M_MIN && ret5m <= PREBREAK_RET5M_MAX);
+      const rampOk = (vol1mRatio >= PREBREAK_VOL1M_RATIO_MIN) || (vol1mZ >= PREBREAK_VOL1M_Z_MIN);
+      const activeOk = (activeDiff1m > PREBREAK_ACTIVE1M_POS) && (activeDiff5m > 0);
 
       let stage = "NONE", stageReason = "";
-      const activeBuyOk = (activeDiff5m !== null) ? (activeDiff5m > 0) : false;
 
-      if (volZ5 >= 2.0 && (activeBuyOk || activeRatio5m >= 0.50)) {
+      // Setup：量/波動異常 + 買盤不弱
+      if (volZ5 >= 1.6 && (activeDiff5m > 0 || (activeRatio5m !== null && activeRatio5m >= 0.50))) {
         stage = "SETUP";
-        stageReason = "量/波動異常 + 主動買偏多";
-      }
-      if (stage !== "NONE" && (oiZ5 >= 1.2 || activeDiff5m > msVol.m*0.08)) {
-        stage = "IGNITE";
-        stageReason = "加上 OI/主動買加速";
-      }
-      if (stage === "IGNITE" && notChasing && (breakUp || ret5m > 0.10) && (!REQUIRE_BULL_TREND || trendOk)) {
-        stage = "CONFIRM";
-        stageReason = "趨勢/突破確認且不追高";
+        stageReason = "量/波動開始異常 + 買盤偏多";
       }
 
-      // 分數（只做多）：把「異常」放大，但追高扣分；偏空的 ret5m<0 會扣
+      // Ignite（Pre-Break）：貼近壓力 + 量爬升 + 主動買入推進 + retOk（不追高）
+      if (stage !== "NONE" && nearHigh && rampOk && activeOk && retOk) {
+        stage = "IGNITE";
+        stageReason = "突破前(1~3m)：貼近壓力 + 量爬升 + 主動買入推";
+      }
+
+      // Confirm：已突破 + 不追高 + 趨勢OK
+      const notChase = ret5m <= CHASE_RET5M_MAX;
+      if (stage === "IGNITE" && brokeHigh && notChase && (!REQUIRE_BULL_TREND || trendOk)) {
+        stage = "CONFIRM";
+        stageReason = "已突破壓力位：可執行";
+      }
+
+      // === Score（更偏 Pre-Break） ===
+      const chasePenalty = Math.max(0, ret5m - CHASE_RET5M_MAX) * 10;
+
       let score =
-        (volZ5 * 8) +
-        (Math.max(0, oiZ5) * 5) +
-        ((activeDiff5m > 0) ? 6 : -6) +
-        ((activeRatio5m !== null) ? (activeRatio5m - 0.5) * 20 : 0) +
-        (trendOk ? 6 : (REQUIRE_BULL_TREND ? -6 : 0)) +
-        (ret5m > 0 ? 3 : -6) -
+        (volZ5 * 6) +
+        (Math.max(0, oiZ5) * 3) +
+        ((activeDiff5m > 0) ? 5 : -7) +
+        ((activeRatio5m !== null) ? (activeRatio5m - 0.5) * 18 : 0) +
+        (trendOk ? 5 : (REQUIRE_BULL_TREND ? -5 : 0)) +
+        (ret5m > 0 ? 2 : -5) -
         chasePenalty;
 
-      // stage 加權
+      // Pre-break 加權：越貼近壓力越高
+      let preBreakBoost = 0;
+      if (nearHigh) preBreakBoost += ((PREBREAK_TO_HIGH_MAX_PCT - toHighPct) / PREBREAK_TO_HIGH_MAX_PCT) * 18;
+      preBreakBoost += Math.max(0, (vol1mRatio - 1.0)) * 6;
+      preBreakBoost += Math.max(0, vol1mZ) * 3;
+      preBreakBoost += (activeDiff1m > 0 ? 8 : -8);
+      score += preBreakBoost;
+
       if (stage === "SETUP") score += 4;
-      if (stage === "IGNITE") score += 10;
+      if (stage === "IGNITE") score += 12;
       if (stage === "CONFIRM") score += 18;
 
-      // 平滑避免跳榜
       st.score = score;
-      st.scoreSmooth = st.scoreSmooth ? (st.scoreSmooth*0.75 + score*0.25) : score;
-
+      st.scoreSmooth = st.scoreSmooth ? (st.scoreSmooth*0.78 + score*0.22) : score;
       st.stage = stage;
       st.stageReason = stageReason;
 
@@ -430,6 +466,7 @@
         volZ: volZ5,
         fund: fundingPct,
         premium: premiumPct,
+        activeDiff1m,
         activeDiff5m,
         activeDiff4h,
         activeRatio5m,
@@ -440,41 +477,53 @@
         oiZ5,
         ema20, ema50, trendOk,
         range20High, range20Low,
+        toHighPct,
+        vol1mRatio,
+        vol1mZ,
       };
 
       S.symbols.set(symbol, st);
     }
 
     /***********************
-     * CANDIDATES + LOCK
+     * TOP5 + LOCK
      ***********************/
     function stageBadge(stage) {
       if (stage === "SETUP") return { cls:"stage-setup", text:"🟨 蓄勢（Setup）" };
-      if (stage === "IGNITE") return { cls:"stage-ignite", text:"🟧 點火（Ignite）" };
+      if (stage === "IGNITE") return { cls:"stage-ignite", text:"🟧 點火（Pre-Break）" };
       if (stage === "CONFIRM") return { cls:"stage-confirm", text:"🟩 觸發（Confirm）" };
       return { cls:"stage-none", text:"⬛ 無" };
+    }
+
+    function passLongOnlyFilter(st) {
+      // 避免「跌成喜憨」又混進來：5m 明顯負 + 主動買入差額 <=0
+      const r = st.last.ret5m;
+      const ad5 = st.last.activeDiff5m;
+      if (r < -0.15 && ad5 !== null && ad5 <= 0) return false;
+
+      // 追高控制（太噴的直接降低入榜機率）
+      if (r > 1.9) return false;
+
+      // C 模式要更像「突破前」：距高太遠的不要
+      if (st.last.toHighPct === null || st.last.toHighPct === undefined) return false;
+      if (st.last.toHighPct > 0.60) return false;
+
+      return true;
     }
 
     function pickTop5() {
       const arr = Array.from(S.symbols.values())
         .filter(x => x.last && x.last.price)
+        .filter(passLongOnlyFilter)
         .sort((a,b) => (b.scoreSmooth - a.scoreSmooth));
 
-      // 先挑前 12，再去除明顯偏空（ret5m 很負、主動買差額負）→ 只做多
-      const filtered = [];
-      for (const x of arr) {
-        const r = x.last.ret5m;
-        const ad = x.last.activeDiff5m;
-        // 不要那種「跌成喜憨」：ret5m < -0.15 且 主動買差額 <=0 → 直接略過
-        if (r < -0.15 && ad !== null && ad <= 0) continue;
-        filtered.push(x);
-        if (filtered.length >= 12) break;
-      }
+      // 優先只收有燈號的（Setup/Ignite/Confirm）
+      const lit = arr.filter(x => x.stage !== "NONE");
+      const pool = (lit.length >= 5) ? lit : arr;
 
-      // 最終 Top5
-      let top = filtered.slice(0,5);
+      let top = pool.slice(0, 5);
 
-      // 鎖定最強：除非有人「明顯更強」（高出 8 分）才換
+      // 鎖定最強：除非有人明顯更強（>= 8分）才換
       if (!S.locked && top.length) S.locked = top[0].symbol;
       if (S.locked) {
         const lockedObj = top.find(x => x.symbol === S.locked) || S.symbols.get(S.locked);
@@ -484,7 +533,6 @@
           const bestScore = best.scoreSmooth || 0;
           if (bestScore - lockedScore >= 8) S.locked = best.symbol;
         }
-        // 置頂：把 locked 放在第一
         top = top.sort((a,b) => (a.symbol === S.locked ? -1 : b.symbol === S.locked ? 1 : (b.scoreSmooth - a.scoreSmooth)));
       }
 
@@ -495,9 +543,23 @@
     /***********************
      * RENDER
      ***********************/
+    function metric(k, v) {
+      return `
+        <div class="pill rounded-lg px-3 py-2">
+          <div class="k">${k}</div>
+          <div class="v mono">${v}</div>
+        </div>
+      `;
+    }
+
     function render() {
       const top5 = pickTop5();
       panel.innerHTML = "";
+
+      if (!top5.length) {
+        panel.innerHTML = `<div class="card rounded-xl p-4 small">目前沒有足夠資料或條件太嚴，請稍等幾輪掃描。</div>`;
+        return;
+      }
 
       for (let idx=0; idx<top5.length; idx++) {
         const st = top5[idx];
@@ -520,7 +582,7 @@
 
         card.innerHTML = `
           <div class="flex flex-wrap items-start justify-between gap-3">
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
               <div class="text-white font-black text-lg">${st.symbol}</div>
               <span class="badge ${b.cls}">${b.text}</span>
               ${isLocked ? `<span class="badge border-emerald-500/50 text-emerald-300 bg-emerald-500/10">✅ 最強鎖定</span>` : ``}
@@ -538,20 +600,24 @@
           <div class="mt-3 grid2 gap-3">
             <!-- LEFT: metrics -->
             <div class="grid3">
-              ${metric("波動/量異常 Z", fmtNum(st.last.volZ,2))}
+              ${metric("距離20高點(%)", fmtNum(st.last.toHighPct,3))}
+              ${metric("1m量/20m中位數", fmtNum(st.last.vol1mRatio,2))}
+              ${metric("1m量Z(相對20m)", fmtNum(st.last.vol1mZ,2))}
+
+              ${metric("主動買入差額(1m,金額)", st.last.activeDiff1m!==null?fmtNum(st.last.activeDiff1m,0):"-")}
+              ${metric("主動買入差額(5m,金額)", st.last.activeDiff5m!==null?fmtNum(st.last.activeDiff5m,0):"-")}
+              ${metric("主動買入比例(5m)", st.last.activeRatio5m!==null?fmtNum(st.last.activeRatio5m,3):"-")}
+
+              ${metric("波動/量異常 Z(5m)", fmtNum(st.last.volZ,2))}
               ${metric("5分鐘漲跌", fmtPct(st.last.ret5m,2))}
               ${metric("資金費率(%)", fmtNum(st.last.fund,2))}
-              ${metric("溢價(%)", fmtNum(st.last.premium,3))}
-              ${metric("主動買入比例(5m)", st.last.activeRatio5m!==null?fmtNum(st.last.activeRatio5m,3):"-")}
-              ${metric("主動買入差額(5m,金額)", st.last.activeDiff5m!==null?fmtNum(st.last.activeDiff5m,0):"-")}
-              ${metric("主動買入比例(4h)", st.last.activeRatio4h!==null?fmtNum(st.last.activeRatio4h,3):"-")}
-              ${metric("主動買入差額(4h,金額)", st.last.activeDiff4h!==null?fmtNum(st.last.activeDiff4h,0):"-")}
+
               ${metric("OI 變化(5m)", st.last.oi5mChg!==null?fmtNum(st.last.oi5mChg,2):"-")}
               ${metric("OI 異常 Z(5m)", fmtNum(st.last.oiZ5,2))}
               ${metric("OI 變化(4h)", st.last.oi4hChg!==null?fmtNum(st.last.oi4hChg,2):"-")}
+
               ${metric("趨勢(EMA20>EMA50 且 價在EMA20上)", st.last.trendOk ? "✅" : "—")}
               ${metric("區間高(20)", fmtNum(st.last.range20High,6))}
-              ${metric("區間低(20)", fmtNum(st.last.range20Low,6))}
               ${metric("現價", fmtNum(st.last.price,6))}
             </div>
 
@@ -573,69 +639,81 @@
       panel.querySelectorAll("button[data-act='analyze']").forEach(btn=>{
         btn.addEventListener("click", async ()=>{
           const sym = btn.getAttribute("data-sym");
-          await analyzeOne(sym, true);
+          await analyzeOne(sym, true); // 手動：永遠送
           render();
         });
       });
-    }
-
-    function metric(k, v) {
-      return `
-        <div class="pill rounded-lg px-3 py-2">
-          <div class="k">${k}</div>
-          <div class="v mono">${v}</div>
-        </div>
-      `;
     }
 
     /***********************
      * GEMINI
      ***********************/
     function buildPromptForGemini(st) {
-      // 只丟精簡摘要（避免 token 爆）
-      // 要求：輸出「只做多」的判斷、預計幾分鐘內表態區間、進場/停損/止盈、信心分數、狀態
       const L = st.last;
 
+      // 只丟精簡摘要（避免 token 爆）
       const summary = {
         symbol: st.symbol,
         onlyLong: true,
+        goal: "pre-break 1-3 minutes before upside breakout",
         stage: st.stage,
         stageReason: st.stageReason,
+
         price: L.price,
         ret5m_pct: L.ret5m,
+
+        // C 模式核心
+        toHighPct_20: L.toHighPct,
+        vol1mRatio_vs20mMedian: L.vol1mRatio,
+        vol1mZ_vs20m: L.vol1mZ,
+        activeDiff1m_quote: L.activeDiff1m,
+
+        // flow / anomalies
         volZ_5m: L.volZ,
-        funding_pct: L.fund,
-        premium_pct: L.premium,
         activeBuyRatio_5m: L.activeRatio5m,
         activeBuyDiff_5m_quote: L.activeDiff5m,
         activeBuyRatio_4h: L.activeRatio4h,
         activeBuyDiff_4h_quote: L.activeDiff4h,
+
+        // OI
         oi_now: L.oiNow,
         oi_change_5m: L.oi5mChg,
         oi_change_4h: L.oi4hChg,
         oiZ_5m: L.oiZ5,
+
+        // funding / premium
+        funding_pct: L.fund,
+        premium_pct: L.premium,
+
         trendOk: !!L.trendOk,
         range20_high: L.range20High,
-        range20_low: L.range20Low,
-        antiChase_ret5m_max: CHASE_RET5M_MAX
+
+        antiChase_ret5m_max: CHASE_RET5M_MAX,
+        prebreak_toHigh_max: PREBREAK_TO_HIGH_MAX_PCT,
       };
 
       return `
-你是合約短線「只做多」的盤勢判讀引擎。請根據我給的精簡數據，輸出「嚴格 JSON」且只能回 JSON（不要任何多餘文字、不要 markdown）。
+你是合約短線「只做多」盤勢判讀引擎。請根據我給的精簡數據，輸出「嚴格 JSON」且只能回 JSON（不要任何多餘文字、不要 markdown）。
 
-任務：判斷這個幣在未來 5~10 分鐘內是否「可能向上表態」，並給出：
-1) 做多/觀望/不做 的方向（只做多，不提供做空策略）
-2) 信心 0~100
-3) 當前狀態（蓄勢/點火/觸發/無）
-4) 預計表態時間區間（分鐘 min/max）
-5) 進場方式與區間（市價/限價、entry_low/entry_high）
-6) 停損（stop）
-7) 分批止盈（takeProfit 陣列）
-8) 失效條件（invalidations 陣列）
-9) 理由要點（reasons 陣列，短句）
+任務：判斷此幣是否處於「突破前 1~3 分鐘」的多方機會（pre-break），並輸出：
+- symbol（字串）
+- 方向（只允許：做多 / 觀望 / 不做）
+- 信心（0~100）
+- 狀態（只允許：蓄勢 / 點火 / 觸發 / 無）
+- 預計表態（物件：{min,max} 單位分鐘，若不做則回 {min:"-",max:"-"}）
+- 分數（0~100，這是你自己的評分）
+- 進場（物件：{type:"限價/市價", entry_low, entry_high, plan}）
+- 停損（數字或字串）
+- 止盈（陣列：["TP1 ...","TP2 ..."]）
+- 失效條件（陣列）
+- 理由要點（陣列，短句）
+- 風險提醒（陣列）
 
-注意：要 anti-chase：若已噴太高或 funding 過熱，要傾向「觀望」並把原因寫在 invalidations/風險。
-請務必把缺失欄位填 "-"，不要留空，不要輸出 null。
+約束（很重要）：
+1) 只做多：不要提供做空策略。
+2) anti-chase：如果 ret5m 已接近/超過 antiChase_ret5m_max 或 funding 過熱，請更保守。
+3) pre-break 核心：toHighPct_20 越小越接近突破；vol1mRatio/vol1mZ 抬升代表點火；activeDiff1m_quote > 0 是關鍵。
+4) 不要輸出 null；缺值用 "-"。
 
 輸入數據(JSON)：
 ${JSON.stringify(summary)}
@@ -643,7 +721,6 @@ ${JSON.stringify(summary)}
     }
 
     async function geminiGenerateJSON(prompt) {
-      // 冷卻判斷
       const now = Date.now();
       if (now < S.globalCooldownUntil) {
         return { ok:false, status:429, err:"全站冷卻中（剛剛 429）" };
@@ -652,19 +729,16 @@ ${JSON.stringify(summary)}
 
       // 全域間隔
       const gap = now - S.lastGeminiAt;
-      if (gap < GLOBAL_MIN_GAP_MS) {
-        await new Promise(r=>setTimeout(r, GLOBAL_MIN_GAP_MS - gap));
-      }
+      if (gap < GLOBAL_MIN_GAP_MS) await new Promise(r=>setTimeout(r, GLOBAL_MIN_GAP_MS - gap));
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
       const body = {
-        // REST 可用 system_instruction（官方例子） :contentReference[oaicite:2]{index=2}
         system_instruction: { parts: [{ text: "你只輸出 JSON。只能回 JSON。不可加任何多餘文字。" }] },
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
           maxOutputTokens: MAX_OUTPUT_TOKENS,
           temperature: 0.25,
-          responseMimeType: "application/json" // 官方 JSON mode 參數 :contentReference[oaicite:3]{index=3}
+          responseMimeType: "application/json"
         }
       };
 
@@ -674,7 +748,7 @@ ${JSON.stringify(summary)}
         method:"POST",
         headers: {
           "Content-Type":"application/json",
-          "x-goog-api-key": S.key, // 官方：x-goog-api-key header :contentReference[oaicite:4]{index=4}
+          "x-goog-api-key": S.key,
         },
         body: JSON.stringify(body)
       });
@@ -689,25 +763,21 @@ ${JSON.stringify(summary)}
       try { data = JSON.parse(txt); } catch(e) { data = { _raw: txt }; }
 
       if (!r.ok) {
-        return { ok:false, status:r.status, err: (data && data.error && data.error.message) ? data.error.message : txt };
+        const msg = (data && data.error && data.error.message) ? data.error.message : txt;
+        return { ok:false, status:r.status, err: msg };
       }
 
       const out = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!out) {
-        return { ok:false, status:500, err:"Gemini 回傳格式異常：找不到 candidates[0].content.parts[0].text" };
-      }
+      if (!out) return { ok:false, status:500, err:"Gemini 回傳格式異常：找不到 candidates[0].content.parts[0].text" };
 
-      // 盡可能抽出 JSON
       const parsed = safeParseJSON(out);
-      if (!parsed) {
-        return { ok:false, status:200, err:"Gemini 沒回有效 JSON（已要求 JSON mode）", raw: out };
-      }
+      if (!parsed) return { ok:false, status:200, err:"Gemini 沒回有效 JSON（已要求 JSON mode）", raw: out };
+
       return { ok:true, status:200, obj: parsed };
     }
 
     function safeParseJSON(s) {
       if (!s) return null;
-      // 若 Gemini 仍包了雜訊，抓第一個 { 到最後一個 }
       const i = s.indexOf("{");
       const j = s.lastIndexOf("}");
       if (i >= 0 && j > i) {
@@ -719,16 +789,14 @@ ${JSON.stringify(summary)}
     }
 
     function normalizeAI(obj, fallbackSymbol) {
-      // 保證欄位齊全（你之前抱怨一堆沒顯示，就是這裡做保底）
       const o = obj || {};
       const get = (k, d="-") => (o[k]===undefined || o[k]===null || o[k]==="") ? d : o[k];
-
       return {
         symbol: get("symbol", fallbackSymbol),
         方向: get("方向", get("bias","觀望")),
         信心: get("信心", get("confidence", 0)),
         狀態: get("狀態", get("state","-")),
-        型態: get("型態", get("pattern","-")),
+        分數: get("分數", get("score","-")),
         預計表態: get("預計表態", get("eta","-")),
         進場: get("進場", get("entry","-")),
         停損: get("停損", get("stop","-")),
@@ -741,7 +809,10 @@ ${JSON.stringify(summary)}
 
     function formatAIChinese(obj) {
       const o = normalizeAI(obj, "-");
-      const eta = (typeof o.預計表態 === "object" && o.預計表態) ? `${o.預計表態.min ?? "-"}~${o.預計表態.max ?? "-"} 分鐘` : String(o.預計表態);
+
+      const eta = (typeof o.預計表態 === "object" && o.預計表態)
+        ? `${o.預計表態.min ?? "-"}~${o.預計表態.max ?? "-"} 分鐘`
+        : String(o.預計表態);
 
       const tp = Array.isArray(o.止盈) ? o.止盈 : [];
       const inv = Array.isArray(o.失效條件) ? o.失效條件 : [];
@@ -749,8 +820,8 @@ ${JSON.stringify(summary)}
       const rk = Array.isArray(o.風險提醒) ? o.風險提醒 : [];
 
       return [
-        `方向：${o.方向}　|　信心：${o.信心}/100`,
-        `狀態：${o.狀態}　|　型態：${o.型態}`,
+        `方向：${o.方向}　|　信心：${o.信心}/100　|　分數：${o.分數}/100`,
+        `狀態：${o.狀態}`,
         `預計表態：${eta}`,
         `進場：${typeof o.進場 === "object" ? JSON.stringify(o.進場) : o.進場}`,
         `停損：${typeof o.停損 === "object" ? JSON.stringify(o.停損) : o.停損}`,
@@ -773,7 +844,7 @@ ${JSON.stringify(summary)}
         return;
       }
 
-      // per-symbol cooldown（手動也要冷卻，避免狂點）
+      // per-symbol cooldown（手動也要冷卻）
       const now = Date.now();
       if (st.ai.cooldownUntil && now < st.ai.cooldownUntil) {
         st.ai.lastErr = "冷卻中，稍後再試";
@@ -788,9 +859,9 @@ ${JSON.stringify(summary)}
         return;
       }
 
-      // Auto 模式：只在 🟧/🟩 才打；Manual：不管條件
+      // Auto：只在 🟧 點火 才送（你選 C 的核心）
       if (!manual) {
-        if (!(st.stage === "IGNITE" || st.stage === "CONFIRM")) return;
+        if (!(st.stage === "IGNITE")) return;
       }
 
       st.ai.lastErr = "";
@@ -809,10 +880,10 @@ ${JSON.stringify(summary)}
         st.ai.lastAt = Date.now();
         st.ai.lastOk = false;
         st.ai.lastErr = `HTTP ${res.status}: ${res.err || "error"}`;
-        st.ai.cooldownUntil = Date.now() + 8000; // 小冷卻避免連點
+        st.ai.cooldownUntil = Date.now() + 8000;
         S.symbols.set(symbol, st);
-        setStatus(`Gemini FAIL：${symbol}（${res.status}）`);
-        if (res.status === 429) setStatus(`Gemini 429：已進入全站冷卻 ${Math.round(COOLDOWN_ON_429_MS/60000)} 分鐘`);
+        if (res.status === 429) setStatus(`Gemini 429：全站冷卻 ${Math.round(COOLDOWN_ON_429_MS/60000)} 分鐘`);
+        else setStatus(`Gemini FAIL：${symbol}（${res.status}）`);
         updateKeyUi();
         return;
       }
@@ -824,18 +895,17 @@ ${JSON.stringify(summary)}
       st.ai.cooldownUntil = Date.now() + 2000;
       S.symbols.set(symbol, st);
 
-      // key status
       S.keyOk = true;
       S.keyLastOkAt = Date.now();
       setStatus(`Gemini OK：${symbol}`);
       updateKeyUi();
     }
 
-    async function analyzeTop3(manual=false) {
+    async function analyzeTop3() {
       const top = pickTop5().slice(0, TOPK_ANALYZE);
       for (const st of top) {
-        await analyzeOne(st.symbol, true); // 你要手動也能打：這裡當成 manual=true
-        await new Promise(r=>setTimeout(r, 200)); // 微小間隔
+        await analyzeOne(st.symbol, true); // 手動：永遠送
+        await new Promise(r=>setTimeout(r, 200));
       }
       render();
     }
@@ -855,10 +925,9 @@ ${JSON.stringify(summary)}
 
       S.keyOk = true;
       S.keyLastOkAt = Date.now();
-    
       setStatus("Test OK：Gemini 可用");
       updateKeyUi();
-      alert("Test OK：Gemini 可用（看 console/network 也會有 request）");
+      alert("Test OK：Gemini 可用（你也可以開 DevTools → Network 看請求是否成功）");
     }
 
     /***********************
@@ -867,7 +936,7 @@ ${JSON.stringify(summary)}
     async function scanTick() {
       if (!S.universe.length) return;
 
-      // round-robin：每次只更新一小批，避免 Binance 打爆
+      // round-robin：每次只更新一小批
       const BATCH = 8;
       const batch = [];
       for (let i=0;i<BATCH;i++) {
@@ -889,16 +958,15 @@ ${JSON.stringify(summary)}
         if (!S.key) return;
         if (Date.now() < S.globalCooldownUntil) return;
 
-        // 只在 top5 已經有 5 支，且至少一支在 🟧/🟩 才自動打
+        // 只在 top5 已經有 5 支，且至少一支在 🟧 才自動打
         const top5 = pickTop5();
         if (top5.length < 5) return;
-        const hot = top5.filter(x => x.stage === "IGNITE" || x.stage === "CONFIRM");
+        const hot = top5.filter(x => x.stage === "IGNITE");
         if (!hot.length) return;
 
-        // 只打 Top3
-        setStatus("Auto Gemini：Top3 ...");
+        setStatus("Auto Gemini：只打 Top3 且僅 🟧 點火 ...");
         for (const st of top5.slice(0, TOPK_ANALYZE)) {
-          await analyzeOne(st.symbol, false); // auto 模式：內部會 gate 只有 🟧/🟩 才送
+          await analyzeOne(st.symbol, false); // auto：內部 gate 只送 🟧
         }
         render();
       }, AUTO_INTERVAL_MS);
@@ -910,7 +978,7 @@ ${JSON.stringify(summary)}
     $("btnSaveKey").addEventListener("click", saveKeyFromInput);
     $("btnClearKey").addEventListener("click", clearKey);
     $("btnTestGemini").addEventListener("click", testGemini);
-    $("btnAnalyzeTop").addEventListener("click", ()=>analyzeTop3(true));
+    $("btnAnalyzeTop").addEventListener("click", analyzeTop3);
     $("btnReset").addEventListener("click", ()=>{
       S.symbols.clear();
       S.locked = null;
@@ -925,11 +993,8 @@ ${JSON.stringify(summary)}
       loadKey();
       setStatus("Booting ...");
       await refreshUniverse();
-      // 先跑一次 scan 讓畫面有東西
       await scanTick();
-      // 週期掃描
       setInterval(scanTick, SCAN_INTERVAL_MS);
-      // Auto Gemini
       startAutoGemini();
       setStatus("Running");
     })();
